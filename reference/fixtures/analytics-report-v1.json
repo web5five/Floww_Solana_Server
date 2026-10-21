@@ -1,0 +1,75 @@
+{
+  "schema_version": "analytics-reference/v1",
+  "resource_ref": "fixture-resource-solana_analytics",
+  "wallet": "fixture-wallet",
+  "data_network": "fixture-mainnet-snapshot",
+  "window_start": "2026-10-11T00:00:00Z",
+  "window_end": "2026-10-18T00:00:00Z",
+  "generated_at": "2026-10-18T06:00:00Z",
+  "data_as_of": "2026-10-18T00:00:00Z",
+  "coverage": {"complete": true, "pagination_complete": true},
+  "is_synthetic": true,
+  "source_refs": ["fixture-source-snapshot"],
+  "transfers": [
+    {
+      "record_id": "incoming-a1",
+      "source_ref": "fixture-source-snapshot",
+      "transaction_ref": "fixture-transaction-1",
+      "event_index": 0,
+      "timestamp": "2026-10-12T00:00:00Z",
+      "asset_ref": "fixture-asset-A",
+      "decimals": 6,
+      "amount_base_units": "2500000",
+      "from_wallet": "fixture-counterparty",
+      "to_wallet": "fixture-wallet"
+    },
+    {
+      "record_id": "incoming-a2",
+      "source_ref": "fixture-source-snapshot",
+      "transaction_ref": "fixture-transaction-1",
+      "event_index": 1,
+      "timestamp": "2026-10-12T00:00:00Z",
+      "asset_ref": "fixture-asset-A",
+      "decimals": 6,
+      "amount_base_units": "1500000",
+      "from_wallet": "fixture-counterparty",
+      "to_wallet": "fixture-wallet"
+    },
+    {
+      "record_id": "outgoing-a1",
+      "source_ref": "fixture-source-snapshot",
+      "transaction_ref": "fixture-transaction-2",
+      "event_index": 0,
+      "timestamp": "2026-10-13T00:00:00Z",
+      "asset_ref": "fixture-asset-A",
+      "decimals": 6,
+      "amount_base_units": "750000",
+      "from_wallet": "fixture-wallet",
+      "to_wallet": "fixture-counterparty"
+    },
+    {
+      "record_id": "incoming-b1",
+      "source_ref": "fixture-source-snapshot",
+      "transaction_ref": "fixture-transaction-3",
+      "event_index": 0,
+      "timestamp": "2026-10-14T00:00:00Z",
+      "asset_ref": "fixture-asset-B",
+      "decimals": 9,
+      "amount_base_units": "1000000001",
+      "from_wallet": "fixture-counterparty",
+      "to_wallet": "fixture-wallet"
+    },
+    {
+      "record_id": "self-a1",
+      "source_ref": "fixture-source-snapshot",
+      "transaction_ref": "fixture-transaction-4",
+      "event_index": 0,
+      "timestamp": "2026-10-15T00:00:00Z",
+      "asset_ref": "fixture-asset-A",
+      "decimals": 6,
+      "amount_base_units": "100000",
+      "from_wallet": "fixture-wallet",
+      "to_wallet": "fixture-wallet"
+    }
+  ]
+}

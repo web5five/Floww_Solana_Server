@@ -77,11 +77,11 @@ def _constant(_: str) -> None:
 
 
 def _json(raw: object, limit: int) -> object:
-    if type(raw) is not str or len(raw.encode("utf-8")) > limit:
-        raise InvalidInput("Invalid size")
     try:
+        if type(raw) is not str or len(raw.encode("utf-8")) > limit:
+            raise InvalidInput("Invalid size")
         return json.loads(raw, object_pairs_hook=_pairs, parse_constant=_constant)
-    except (ValueError, RecursionError) as exc:
+    except (ValueError, RecursionError, UnicodeError) as exc:
         raise InvalidInput("Invalid JSON") from exc
 
 
@@ -153,6 +153,8 @@ class BackendOutcome:
     settlement_ref: str | None = None
     delivery_ref: str | None = None
     evidence_kind: str = "synthetic_fixture"
+    reason_code: str | None = None
+    next_action: str | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +179,8 @@ class Result:
     question: str | None = None
     excerpts: tuple[Record, ...] = ()
     evidence_kind: str | None = None
+    backend_reason_code: str | None = None
+    backend_next_action: str | None = None
 
 
 class SelectionModel(Protocol):
@@ -290,58 +294,84 @@ def normalize_resource(resource: ProtectedResource) -> tuple[Record, ...]:
     return tuple(records)
 
 
-def consume(proposal: Proposal, outcome: BackendOutcome,
-            read_resource: Callable[[str], ProtectedResource], select_evidence: EvidenceModel,
-            refresh: Callable[[], Context]) -> Result:
-    """Release cited excerpts only for a matching, fully confirmed outcome.
+def outcome_result(status: str, code: str, outcome: BackendOutcome, **kwargs) -> Result:
+    """Preserve trusted, bounded backend diagnostics without executing actions."""
+    return Result(status, code, backend_reason_code=outcome.reason_code,
+                  backend_next_action=outcome.next_action, **kwargs)
+
+
+def read_confirmed_resource(proposal: Proposal, outcome: BackendOutcome,
+                            read_resource: Callable[[str], ProtectedResource],
+                            refresh: Callable[[], Context]) -> ProtectedResource | Result:
+    """Shared access gate for generic and resource-specific AI adapters.
 
     No automatic retries or new purchase: UNKNOWN returns reconciliation work
     to the backend. Read authorization is checked by the adapter at delivery
     time; an old paid task can be readable after the purchase mandate expires.
     """
     if (not isinstance(proposal, Proposal) or not isinstance(outcome, BackendOutcome)
+            or not isinstance(proposal.context, Context)
+            or not isinstance(proposal.candidate, Candidate)
             or outcome.proposal_ref != proposal.proposal_ref
             or outcome.context != proposal.context
             or outcome.requirements_ref != proposal.candidate.requirements_ref
             or not _ref(outcome.attempt_ref)
             or outcome.evidence_kind not in ("synthetic_fixture", "backend_verified")):
         return Result("STOPPED", "OUTCOME_BINDING_MISMATCH")
+    for value in (outcome.reason_code, outcome.next_action):
+        if value is not None and (type(value) is not str
+                or re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", value) is None):
+            return Result("STOPPED", "INVALID_OUTCOME")
+    def result(status: str, code: str) -> Result:
+        return outcome_result(status, code, outcome)
     if outcome.policy not in ("ALLOW", "DENY", "PENDING"):
-        return Result("STOPPED", "INVALID_OUTCOME")
+        return result("STOPPED", "INVALID_OUTCOME")
     if outcome.policy == "DENY":
-        return Result("DENIED", "POLICY_DENIED")
+        return result("DENIED", "POLICY_DENIED")
     if outcome.policy != "ALLOW":
-        return Result("WAITING", "AUTHORIZATION_PENDING")
+        return result("WAITING", "AUTHORIZATION_PENDING")
     if outcome.payment == "UNKNOWN":
-        return Result("WAITING", "PAYMENT_RECONCILIATION_REQUIRED")
+        return result("WAITING", "PAYMENT_RECONCILIATION_REQUIRED")
     if outcome.payment in ("NOT_ATTEMPTED", "PENDING"):
-        return Result("WAITING", "PAYMENT_NOT_CONFIRMED")
+        return result("WAITING", "PAYMENT_NOT_CONFIRMED")
     if outcome.payment == "FAILED":
-        return Result("STOPPED", "PAYMENT_FAILED")
+        return result("STOPPED", "PAYMENT_FAILED")
     if outcome.payment != "CONFIRMED" or not _ref(outcome.settlement_ref):
-        return Result("STOPPED", "INVALID_OUTCOME")
+        return result("STOPPED", "INVALID_OUTCOME")
     if outcome.fulfillment == "FAILED":
-        return Result("STOPPED", "PAID_RESOURCE_UNDELIVERED")
+        return result("STOPPED", "PAID_RESOURCE_UNDELIVERED")
     if outcome.fulfillment == "PENDING":
-        return Result("WAITING", "RESOURCE_PENDING")
+        return result("WAITING", "RESOURCE_PENDING")
     if outcome.fulfillment != "COMPLETED" or not _ref(outcome.delivery_ref):
-        return Result("STOPPED", "INVALID_OUTCOME")
+        return result("STOPPED", "INVALID_OUTCOME")
     try:
         if refresh() != proposal.context:
-            return Result("STOPPED", "STALE_CONTEXT")
+            return result("STOPPED", "STALE_CONTEXT")
         resource = read_resource(outcome.delivery_ref)
     except Exception:
-        return Result("STOPPED", "RESOURCE_UNAVAILABLE")
+        return result("STOPPED", "RESOURCE_UNAVAILABLE")
+    if not isinstance(resource, ProtectedResource) or resource.delivery_ref != outcome.delivery_ref:
+        return result("STOPPED", "INVALID_RESOURCE")
+    return resource
+
+
+def consume(proposal: Proposal, outcome: BackendOutcome,
+            read_resource: Callable[[str], ProtectedResource], select_evidence: EvidenceModel,
+            refresh: Callable[[], Context]) -> Result:
+    """Release cited excerpts only after the shared gate and a final access check."""
+    resource = read_confirmed_resource(proposal, outcome, read_resource, refresh)
+    if isinstance(resource, Result):
+        return resource
+    def result(status: str, code: str, **kwargs) -> Result:
+        return outcome_result(status, code, outcome, **kwargs)
     try:
-        if not isinstance(resource, ProtectedResource) or resource.delivery_ref != outcome.delivery_ref:
-            raise InvalidInput("Resource binding mismatch")
         records = normalize_resource(resource)
     except (InvalidInput, AttributeError, UnicodeError):
-        return Result("STOPPED", "INVALID_RESOURCE")
+        return result("STOPPED", "INVALID_RESOURCE")
     try:
         raw = select_evidence(RESULT_INSTRUCTION, proposal.context.purpose, records)
     except Exception:
-        return Result("STOPPED", "RESULT_MODEL_UNAVAILABLE")
+        return result("STOPPED", "RESULT_MODEL_UNAVAILABLE")
     try:
         selected = _json(raw, MAX_MODEL_BYTES)
         if type(selected) is not dict or set(selected) != {"record_ids"}:
@@ -354,12 +384,12 @@ def consume(proposal: Proposal, outcome: BackendOutcome,
         if any(value not in by_id for value in ids):
             raise InvalidInput("Unknown reference")
     except (InvalidInput, UnicodeError):
-        return Result("STOPPED", "INVALID_RESULT_REFERENCES")
+        return result("STOPPED", "INVALID_RESULT_REFERENCES")
     try:
         if refresh() != proposal.context:
-            return Result("STOPPED", "STALE_CONTEXT")
+            return result("STOPPED", "STALE_CONTEXT")
     except Exception:
-        return Result("STOPPED", "CONTEXT_UNAVAILABLE")
+        return result("STOPPED", "CONTEXT_UNAVAILABLE")
     # No model-authored facts or success statements can enter the answer.
-    return Result("EVIDENCE_READY", "CITED_EXCERPTS", excerpts=tuple(by_id[i] for i in ids),
+    return result("EVIDENCE_READY", "CITED_EXCERPTS", excerpts=tuple(by_id[i] for i in ids),
                   evidence_kind=outcome.evidence_kind)

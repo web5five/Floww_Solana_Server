@@ -2,6 +2,8 @@
 
 Owner: Geondong Kim (`geondongkim`). Prepared: 2026-10-18 KST.
 
+Updated 2026-10-21: [wallet analytics adapter and acceptance cases](AI_ANALYTICS_ADAPTER.md).
+
 Status: **reference implementation tested locally; shared contract review pending**.
 This document does not select an MVP, approve a backend API/schema, choose a model
 provider, or claim a live purchase. AI-01 remains open until adjacent owners review
@@ -56,6 +58,13 @@ The reference implements B–F and L–O through injected local ports. G–K des
 backend-owned responsibilities and are represented by labeled fixtures only.
 Two sequential model roles belong to one simple workflow; there are no autonomous
 sub-agents, persistent memory, new services or new infrastructure.
+
+For the bounded wallet report, `propose_analytics` also requires the explicit
+wallet, data network and time window before discovery. The immutable proposal
+retains that request. `consume_analytics` shares the confirmed-resource access
+gate above, then validates and aggregates numeric records deterministically
+instead of asking a model to calculate or invent the answer. Generic market and
+translation adapters continue to use the original evidence-selection path.
 
 참조 코드는 제안과 결과 소비를 구현합니다. 승인·서명·결제·조회 복구는 백엔드와
 체인 담당 범위로 남겨둡니다. 순차적인 두 모델 호출 역할을 사용하며 실제 모델
@@ -118,6 +127,11 @@ The backend still must revalidate the **current exact** payment requirement and
 approval immediately before signing; an earlier AI snapshot is insufficient.
 
 ## Outcome handling / 결과·실패 처리
+
+Trusted backend `reason_code` and `next_action` tokens are retained separately
+from the AI component's own result code. They are not executable commands. The
+reference accepts optional uppercase diagnostic tokens; BE-01 will map the
+agreed wire fields/enums to these local values.
 
 | Observation | AI behavior | Required external responsibility |
 | --- | --- | --- |

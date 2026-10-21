@@ -13,6 +13,19 @@
 
 ## Change and reason / 변경과 이유
 
+### October 21: bounded analytics preparation
+
+Added explicit scope checks, immutable request binding, strict report validation,
+exact transfer aggregation, provenance references and partial-coverage output.
+The generic and analytics consumers share one access gate. See the
+[adapter guide](AI_ANALYTICS_ADAPTER.md) for executable examples and the compact
+integration checklist. Current checks are in [verification.json](verification.json);
+the original 35-test record is preserved in
+[verification-2026-10-18.json](verification-2026-10-18.json).
+
+KO: 지갑·기간 검증, 분석 자료 검사, 자산별 정확한 집계와 근거 연결을 구현했습니다.
+공급자·공통 API 합의가 끝나면 어댑터를 연결할 수 있도록 준비했습니다.
+
 EN: Implements independently testable proposal validation and protected-resource
 consumption while the team is choosing its MVP and shared contracts. Model output
 can select known candidates/records but cannot rewrite quote terms or issue
@@ -70,8 +83,10 @@ changed to complete by this work.
   belong to the team's foundation decision. No production dependency was added.
 - Removal/rollback is limited to this reference directory, its docs and README
   link. There is no data migration, deployed service or resource to roll back.
-- Confluence sync: **PENDING_SYNC**. The pages above are sources; this work does
-  not claim to have edited them.
+- [October 21 AI workflow](https://portfolio4ramp.atlassian.net/wiki/spaces/FTW/pages/7274500)
+  and [ticket review](https://portfolio4ramp.atlassian.net/wiki/spaces/FTW/pages/7274523)
+  define the current planning basis. Implementation evidence lives in this PR;
+  integration decisions remain in the review table above.
 - After the shared contract is approved: map ports to the actual backend, connect
   the approved model with bounded deadlines, implement the selected provider's
   adapter, then record separate live model, HTTP402, settlement, resource and UI

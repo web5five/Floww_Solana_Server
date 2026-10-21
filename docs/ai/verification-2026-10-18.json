@@ -1,0 +1,60 @@
+{
+  "task": "AI-01 / partial AI-02 and AI-03",
+  "recorded_at": "2026-10-18T07:32:29.059735+00:00",
+  "environment": {
+    "os": "Darwin",
+    "release": "27.0.0",
+    "machine": "arm64",
+    "python": "3.14.6"
+  },
+  "base_commit": "6d8e7f9c0c89803201b5c09b7de84f17e317a74c",
+  "branch": "feature/ai-01-baseline-reference",
+  "checks": [
+    {
+      "command": "PYTHONPATH=reference python3 -m unittest discover -s reference/tests -v",
+      "exit_code": 0,
+      "tests": 35,
+      "failures": 0,
+      "errors": 0
+    },
+    {
+      "command": "PYTHONPATH=reference python3 -m ai_baseline.demo",
+      "exit_code": 0,
+      "synthetic_resource_cases": 3,
+      "unknown_payment_cases": 3
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "evidence_kind": "synthetic_fixture",
+  "source_sha256": {
+    "README.md": "c9fc53833a83a3dd816d25db737a852e8d9f26ee86ae6687f35a4082630b0451",
+    "docs/ai/AI-01_REVIEW_AND_HANDOFF.md": "12d55bf0d6a158ee4bee4b586dda64f784de254887992248cf79d29271039f93",
+    "docs/ai/AI-01_WORKFLOW.md": "cd98842d18145f2d100b861f9ef23e50f8e65216e9f4974064961276750acc82",
+    "reference/.gitignore": "6feaded4e28ea86e001a6751b4e3d960e8b7c31b9616ff9936b79297086e809b",
+    "reference/ai_baseline/__init__.py": "7e7f64668c85b3c07adad1b74d0619fcc2395118caedac838bbf53d2ad46dad4",
+    "reference/ai_baseline/demo.py": "2ced31a591e32d44176f6df8dc8c86fb8d9cdef6e460154a9af41eda40a76da5",
+    "reference/ai_baseline/fixtures.py": "cdb3db28b181645aff799b32499dca1f04b3260e3f602ceb4a0abc2ccf1a8c22",
+    "reference/ai_baseline/workflow.py": "90cd033bd2141b05d76a9290a4e6a1248c3b62384a793481a45ddd783b1cc69d",
+    "reference/tests/test_ai_baseline.py": "57b0c49239f64e8dcd06b59dfda44a368ad876095e888c1e0a38f6534db5f966"
+  },
+  "not_verified": [
+    "shared API/DTO agreement",
+    "independent teammate review",
+    "production server integration",
+    "Windows execution",
+    "actual model/provider behavior",
+    "HTTP 402 negotiation",
+    "Devnet settlement",
+    "merchant verification and actual protected resource",
+    "browser/UI integration",
+    "deployment"
+  ],
+  "scope_notes": [
+    "No authentication, public routes, database or policy implementation changed.",
+    "No payment/signing or automatic retry capability in reference workflow.",
+    "Synthetic outcomes are not actual payment evidence."
+  ]
+}
