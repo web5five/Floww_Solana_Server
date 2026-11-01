@@ -1,0 +1,56 @@
+[
+  {
+    "case": "complete",
+    "format": "markdown",
+    "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.report_demo --case complete --format markdown",
+    "exit_code": 0,
+    "characters": 3021,
+    "sha256": "e72f18a9fbb8d5e6a2cf8a32cdda5fcff82974c0f24d8bd2666fdddae39b6b3c",
+    "synthetic_disclosure": true
+  },
+  {
+    "case": "complete",
+    "format": "html",
+    "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.report_demo --case complete --format html",
+    "exit_code": 0,
+    "characters": 5617,
+    "sha256": "799a39c6b12af96b71d49382c0e25011893b55a1b3123f3fc2426f062fcf3b41",
+    "synthetic_disclosure": true
+  },
+  {
+    "case": "partial",
+    "format": "markdown",
+    "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.report_demo --case partial --format markdown",
+    "exit_code": 0,
+    "characters": 3291,
+    "sha256": "4405a29504d0f1e742364e488aa8e7b5668820602448c19108b6b605e8c6e488",
+    "synthetic_disclosure": true
+  },
+  {
+    "case": "partial",
+    "format": "html",
+    "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.report_demo --case partial --format html",
+    "exit_code": 0,
+    "characters": 5920,
+    "sha256": "6eea55f0914a7aeabba7137a6196a0e47ff0e4731a32b5271046221cd332bf2a",
+    "synthetic_disclosure": true
+  },
+  {
+    "case": "empty-partial",
+    "format": "markdown",
+    "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.report_demo --case empty-partial --format markdown",
+    "exit_code": 0,
+    "characters": 2201,
+    "sha256": "7b2b353dbad9732dd59cb841efe507056216e82660fa3eae8826e232463d678d",
+    "synthetic_disclosure": true
+  },
+  {
+    "case": "empty-partial",
+    "format": "html",
+    "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.report_demo --case empty-partial --format html",
+    "exit_code": 0,
+    "characters": 4045,
+    "sha256": "1340f511c3d5633fd0dfea233d4daaa7610698f246220816b499e113f6bb4645",
+    "synthetic_disclosure": true
+  }
+]
