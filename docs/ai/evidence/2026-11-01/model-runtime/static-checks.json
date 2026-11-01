@@ -1,0 +1,36 @@
+[
+  {
+    "command": [
+      "actionlint",
+      ".github/workflows/ai-reference.yml"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "command": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "stdout": "",
+    "stderr": ""
+  },
+  {
+    "check": "New source/doc whitespace and actual filesystem names NFC",
+    "paths": [
+      "README.md",
+      "reference/ai_baseline/model_api.py",
+      "reference/tests/test_model_api.py",
+      "docs/ai/AI_MODEL_ADAPTER.md",
+      "reference/ai_baseline/evaluation.py",
+      "reference/evaluations/purpose-and-evidence-v1.json",
+      "reference/tests/test_evaluation.py",
+      "docs/ai/AI_EVALUATION.md",
+      ".github/workflows/ai-reference.yml"
+    ],
+    "passed": true
+  }
+]

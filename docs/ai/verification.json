@@ -1,55 +1,74 @@
 {
-  "task": "AI-01 / AI-02 / AI-03 wallet report presentation and checkpoint evidence",
-  "recorded_at": "2026-11-01T09:35:25.751647+09:00",
+  "task": "AI-01 / AI-02 / AI-03 configured model runtime and purpose/evidence evaluation",
+  "recorded_at": "2026-11-01T10:26:25+09:00",
+  "base_commit": "296368c5e8baaa31915d3721ff3e6e1f5b2f97dc",
+  "branch": "feature/ai-01-baseline-reference",
   "environment": {
     "os": "Darwin",
     "machine": "arm64",
-    "python": "3.14.6"
+    "tested_python": [
+      "3.13.3",
+      "3.14.6"
+    ]
   },
-  "base_commit": "d0d191ebbb033cae8bd2c968e8aab20812457b90",
-  "branch": "feature/ai-01-baseline-reference",
+  "tests": 137,
+  "existing_tests": 89,
+  "model_adapter_tests": 23,
+  "evaluation_tests": 25,
   "checks": [
     {
-      "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m unittest discover -s reference/tests -v",
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=reference python3 -m unittest discover -s reference/tests -v",
       "exit_code": 0,
-      "evidence": "docs/ai/evidence/2026-11-01/unit-tests.txt"
+      "python": "3.13.3",
+      "evidence": "docs/ai/evidence/2026-11-01/model-runtime/python-3.13-tests.txt"
     },
     {
-      "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.demo",
+      "command": "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=reference python3.14 -m unittest discover -s reference/tests -v",
       "exit_code": 0,
-      "evidence": "docs/ai/evidence/2026-11-01/generic-demo.jsonl"
+      "python": "3.14.6",
+      "evidence": "docs/ai/evidence/2026-11-01/model-runtime/python-3.14-tests.txt"
     },
     {
-      "command": "PYTHONPATH=reference /opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.analytics_demo",
+      "check": "Actual loopback HTTP with injected scripted Responses outputs through run_evaluation",
       "exit_code": 0,
-      "evidence": "docs/ai/evidence/2026-11-01/analytics-demo.jsonl"
+      "evidence": "docs/ai/evidence/2026-11-01/model-runtime/evaluation-loopback.json"
     },
     {
-      "command": "PYTHONPATH=reference python3 -m ai_baseline.report_demo --case {complete,partial,empty-partial} --format {markdown,html}",
+      "command": "actionlint .github/workflows/ai-reference.yml; git diff --check; new file whitespace/NFC checks",
       "exit_code": 0,
-      "cases": 6,
-      "evidence": "docs/ai/evidence/2026-11-01/report-demo-smoke.json"
-    },
-    {
-      "command": "git diff --check; source/document trailing-whitespace and final-newline validation",
-      "exit_code": 0,
-      "evidence": "docs/ai/evidence/2026-11-01/whitespace.txt"
-    },
-    {
-      "command": "Read filesystem entry names and validate all created path components as Unicode NFC",
-      "exit_code": 0,
-      "evidence": "docs/ai/evidence/2026-11-01/filename-nfc.json"
+      "evidence": "docs/ai/evidence/2026-11-01/model-runtime/static-checks.json"
     }
   ],
-  "tests": 89,
-  "existing_tests": 70,
-  "renderer_demo_tests": 19,
-  "generic_demo_cases": 6,
-  "analytics_demo_cases": 5,
-  "report_demo_cases": 6,
-  "evidence_kind": "synthetic_fixture",
+  "evaluation_protocol": {
+    "synthetic_cases": 6,
+    "positive_scripted_scenario": {
+      "cases_passed": 6,
+      "http_requests": 10
+    },
+    "known_but_irrelevant_candidate": {
+      "cases_passed": 5,
+      "cases_failed": 1,
+      "selection_structurally_valid": true,
+      "selection_expectation_match": false,
+      "failed_case_resource_reads": 0,
+      "http_requests": 9
+    }
+  },
+  "evidence_kind": "local_unit_and_loopback_http_with_scripted_model_outputs_and_synthetic_backend",
+  "live_model_called": false,
+  "real_payment_executed": false,
+  "ci": {
+    "workflow": ".github/workflows/ai-reference.yml",
+    "python_matrix": [
+      "3.11",
+      "3.13",
+      "3.14"
+    ],
+    "trigger": "pull_request to main for reference/docs changes",
+    "result_note": "Local records do not establish GitHub CI success; inspect checks for the exact PR head."
+  },
   "source_sha256": {
-    "README.md": "65f0e26b24ea9ff3d44ff8f3664f6d21a8588992861f3d6f378d9cdd5d89039d",
+    "README.md": "07b1fcefdd9b1e4c4e452d6524dcedccbeb211c311cec7912285d97cb0322b32",
     "reference/ai_baseline/__init__.py": "7e7f64668c85b3c07adad1b74d0619fcc2395118caedac838bbf53d2ad46dad4",
     "reference/ai_baseline/analytics.py": "8f4119b3ab13d2283b140b7dda6eb44c7e3cee92e1a8b3029ae7eeb9917876ab",
     "reference/ai_baseline/analytics_demo.py": "8cd717a5ad389a5382c696982ca6aee60540149b023a0c28f18f9dc8ad30cb2c",
@@ -65,37 +84,50 @@
     "docs/ai/AI-01_REVIEW_AND_HANDOFF.md": "f5417d7201d232cdd502a80da841b67b3439bfee24ad4693a9dbd1af7ae499cd",
     "docs/ai/AI-01_WORKFLOW.md": "d360d42b9f244d0829bbe6bb68634da3027b742278dc0e22d1c1cf4586e41b65",
     "docs/ai/AI_ANALYTICS_ADAPTER.md": "628a5eb1d4e5016df0f400846a9296c32f2e3b4e6275861c0a76303377843c02",
-    "docs/ai/AI_REPORT_OUTPUT.md": "783e4e332fdc5bafb6741d88cb6ebcbc67b0d1399da34c77ea80b8a140d52176"
+    "docs/ai/AI_REPORT_OUTPUT.md": "783e4e332fdc5bafb6741d88cb6ebcbc67b0d1399da34c77ea80b8a140d52176",
+    "reference/ai_baseline/model_api.py": "695b07ce84f61892f03dd465422ba31023ab72b4c10a6247954d3d94d1cce6ad",
+    "reference/tests/test_model_api.py": "682c0f3cf29a5d334a24cec29fe710dfa45dcf01e34a6b7b2656d97b89fb254b",
+    "docs/ai/AI_MODEL_ADAPTER.md": "944c9dea3b5e82909f13b3243787942eed12d409daa0d8424705bf6e89102bee",
+    "reference/ai_baseline/evaluation.py": "b3e03c525067fc01ce0ab1c5ec090bf00436ba005ce2c099ce0af347cc356e10",
+    "reference/evaluations/purpose-and-evidence-v1.json": "d4e3b568920cdf1e3498bd845836b700af508c929f92858443becdb4934bf714",
+    "reference/tests/test_evaluation.py": "26e3e1adb5b4249ad1699b9db405fb7be75cde5381f2c059061632753d16b690",
+    "docs/ai/AI_EVALUATION.md": "e0d51088dab05620819fb429fc7252cf684b85c682e77367a499363e9d019bd7",
+    ".github/workflows/ai-reference.yml": "c761529bed12204eea446171bc060ec902deb2597813e3d9c4b31d83f9660f3e"
   },
   "evidence_sha256": {
-    "docs/ai/evidence/2026-11-01/analytics-demo.jsonl": "96b5e6f6d8c017d73a4e739e2ddb4228cbc4daad85bd2a1cfde20933e83c2579",
-    "docs/ai/evidence/2026-11-01/filename-nfc.json": "7234d3638588f8de635f552805b5e8928ed152911290c38b9c76ba4eab736452",
-    "docs/ai/evidence/2026-11-01/generic-demo.jsonl": "8369fdf81dd0cd51bafeb294b034399a8c5954493c8f3f51209a3ea31070ed1a",
-    "docs/ai/evidence/2026-11-01/report-demo-smoke.json": "034eb9a8f120314e040a07f4e7298a6826cd96a0de0b5363ad84fd6a0bc881f8",
-    "docs/ai/evidence/2026-11-01/unit-tests.txt": "2e126f11c302934ddbb6531e17d050352d5f1c55ced385b5365ba13fe869c77d",
-    "docs/ai/evidence/2026-11-01/whitespace.txt": "d4c9e71ec27a67f436242c3e968ea8597b1bb2c26364fcd13f6870d603157539"
+    "docs/ai/evidence/2026-11-01/model-runtime/evaluation-loopback.json": "8e1661ec1dad0e5403ab7b06b602048a9bf24c35626292c0a5f6b7bc4a0ec8ea",
+    "docs/ai/evidence/2026-11-01/model-runtime/local-checks.json": "b6f216020feab8c35de64a242dcadcbc2bab58f0cd050b222617333162b1594e",
+    "docs/ai/evidence/2026-11-01/model-runtime/python-3.13-tests.txt": "3c0efd5f4eb1051eb3c0030b2f6ece76da05fd9523f32b556f8656b4822e537b",
+    "docs/ai/evidence/2026-11-01/model-runtime/python-3.14-tests.txt": "b7e6c692e14726ca7e10ffbce8097efc1704518dd9fd016313bdee2461f8cc6e",
+    "docs/ai/evidence/2026-11-01/model-runtime/static-checks.json": "bfddaa1812badcd5fd1d215949612c93313c12e5ee344151f0c67c750c0d7417"
   },
   "history": {
-    "previous_manifest": "docs/ai/verification-2026-10-21.json",
-    "previous_manifest_sha256": "048cf8174d3577a2cc3bb9820c601686064c9ac2a3c313ed47d776e7489103fd",
-    "original_october18_manifest_and_october21_evidence_preserved": true
+    "previous_manifest": "docs/ai/verification-2026-11-01-report.json",
+    "previous_manifest_sha256": "a107062b28cb6729863a9c9ca5a72105567f5788292e8f7cdfb1fa836d386dc6",
+    "previous_tests": 89,
+    "previous_october18_october21_and_november1_evidence_preserved": true
   },
   "integration_pending": [
-    "shared API/DTO review",
-    "provider report mapper and canonical identifiers",
-    "model provider and bounded runtime callbacks",
-    "payment and protected-body verification",
-    "durable idempotency/recovery",
-    "real paid-response and frontend integration",
-    "production access rules for saved report exports"
+    "Team shared backend DTO/authenticated observation mapping",
+    "Production provider/model selection and configuration",
+    "Production callback cancellation/deadline boundary",
+    "Selected data source canonical mapping",
+    "Durable payment/delivery identity and recovery",
+    "Real model quality and paid-response/frontend integration"
   ],
   "not_verified": [
-    "actual model/provider behavior",
-    "HTTP 402 and Devnet settlement",
-    "production integration or deployment",
-    "independent teammate review",
-    "Windows execution",
-    "visual browser acceptance of exported reports"
+    "Live OpenAI model behavior or account/model access",
+    "Live data provider behavior",
+    "HTTP 402 with Solana Devnet settlement/delivery",
+    "Production backend/frontend deployment and E2E",
+    "Independent teammate approval",
+    "Windows execution"
   ],
-  "presentation_boundary": "Render only an AnalyticsAnswer released by consume_analytics; rendering neither grants access nor proves settlement/delivery. Demo selection and payment/delivery observations are scripted synthetic fixtures."
+  "runtime_limits": "Fixed official HTTPS endpoint; explicit 127.0.0.1 test-only constructor; no retry/redirect. Socket inactivity timeout is not a total wall-clock deadline and does not bound DNS or continuous trickle. Existing workflow gates remain unchanged.",
+  "official_sources": [
+    "https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses",
+    "https://developers.openai.com/api/docs/guides/migrate-to-responses?api-mode=responses",
+    "https://github.com/actions/setup-python",
+    "https://github.com/actions/checkout"
+  ]
 }
