@@ -19,6 +19,8 @@ services:
         value: 10000
       - key: DATABASE_URL
         sync: false
+      - key: DATABASE_CA_PEM
+        sync: false
       - key: FLOWW_ENABLE_DEVNET_PAYMENTS
         value: false
       - key: FLOWW_MODEL

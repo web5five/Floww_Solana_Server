@@ -31,7 +31,7 @@ export async function buildRuntime(input = {}) {
   let store = input.store;
   if (!store && config.databaseUrl) {
     const { PostgresStore } = await import('./postgres-store.mjs');
-    store = await PostgresStore.open(config.databaseUrl);
+    store = await PostgresStore.open(config.databaseUrl, { caPem: config.databaseCaPem });
   }
   store ??= new Store(config.dbPath);
   const rpc = input.rpc ?? createRpc(config.rpcUrl, { timeoutMs: config.requestTimeoutMs });

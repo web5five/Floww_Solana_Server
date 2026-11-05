@@ -61,12 +61,13 @@ Delivery: NOT_STARTED / PENDING / COMPLETED / FAILED. Policy: PENDING / ALLOW / 
   transport tests are not Devnet settlement evidence.
 
 Geondong subsequently requested a fresh Infisical setup, OpenAI key, database
-and deployment resources. Account setup is a separate workstream: the specific
-browser confirmation for irreversible cleanup, new credentials and account
-terms is pending. Deployment files are prepared, not evidence of a running
-cloud service. Remote startup requires an explicit mode, an HTTPS exact origin
-and PostgreSQL; it refuses disposable container-local SQLite. Existing EVM
-deployments and databases remain separate.
+and deployment resources. After the November 6 confirmation, the new secret
+store, Responses key, managed database and Render account were created. The
+controller keeps exact IDs and acceptance evidence outside this repository.
+Deployment files are prepared; a public cloud service has not been released.
+Remote startup requires an explicit mode, an HTTPS exact origin and PostgreSQL;
+it refuses disposable container-local SQLite. Existing EVM deployments and
+databases remain separate.
 
 No mainnet payment, paid upgrade, team message, external documentation
 publication or legacy/shared DB migration is authorized by this implementation.

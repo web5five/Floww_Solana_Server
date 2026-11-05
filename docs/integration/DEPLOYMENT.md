@@ -8,10 +8,12 @@ the pinned production packages. The image has not yet been built or deployed.
 
 The requested target is a fresh `floww-solana` setup: Infisical for server secrets,
 an OpenAI project-scoped Responses key, Supabase PostgreSQL and a Render Free web
-service in Singapore. Actual key issuance, DB creation and Render registration
-are pending the specific browser confirmation. No credentials belong in this
-repository or Docker build arguments. Do not copy credentials from the legacy
-Floww, LALA or AFK projects.
+service in Singapore. Key issuance, DB creation, secret readback and Render
+registration were completed after the November 6 confirmation. The controller's
+local provisioning record contains the destination IDs and acceptance evidence.
+Git provider installation and public service deployment are separate steps.
+No credentials belong in this repository or Docker build arguments. Do not
+copy credentials from the legacy Floww, LALA or AFK projects.
 
 Render Free has an [ephemeral filesystem and idle spin-down](https://render.com/docs/free).
 The server therefore refuses remote mode without `DATABASE_URL`. Free Render
@@ -33,6 +35,7 @@ proves that the process accepts connections, not payment or model readiness.
 | `FLOWW_HOST` / `PORT` | `0.0.0.0` / `10000` |
 | `FLOWW_PUBLIC_ORIGIN` | Exact public HTTPS origin; if absent, Render's `RENDER_EXTERNAL_URL` is used |
 | `DATABASE_URL` | New DB connection string saved in Infisical; TLS certificate verification remains on |
+| `DATABASE_CA_PEM` | Optional provider-issued CA PEM from the new DB's official settings; injected only at runtime |
 | `OPENAI_API_KEY` | New restricted server key, saved in Infisical and injected only at runtime |
 | `FLOWW_MODEL` | Explicit permitted model after bounded API verification |
 | `MERCHANT_PAY_TO` | Public Devnet merchant wallet address, never a private key |
@@ -43,6 +46,15 @@ string from the new project's Connect screen. Do not guess the pooler hostname.
 The service uses a maximum pool of five connections and its own `floww_runtime`
 schema. [Supabase connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres)
 explains direct and pooled connection choices. Existing databases are untouched.
+
+For a login role without database-level CREATE, provision `floww_runtime` as an
+admin first and grant the runtime role USAGE/CREATE only on that schema. Startup
+checks for the existing schema while holding its advisory transaction lock and
+creates it only if absent; it never grants itself broader privileges. Runtime
+tables belong to the limited login. A missing schema without creation rights
+fails closed. A provider CA can be supplied through `DATABASE_CA_PEM`; its X509
+CA constraint, current validity and size are checked before any connection, and
+peer certificate verification always remains enabled.
 
 `FLOWW_PAYER_KEY_FILE` is optional while payments are disabled. Enabling it
 requires a 64-byte Devnet keypair in an owner-readable, non-symlink mode-0600

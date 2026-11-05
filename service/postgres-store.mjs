@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, X509Certificate } from 'node:crypto';
 import { ServiceError, fail } from './config.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -13,7 +13,24 @@ const rejectAsync = value => {
   }
 };
 
-function poolConfig(databaseUrl) {
+function certificateAuthority(caPem) {
+  if (caPem === undefined || caPem === null || caPem === '') return undefined;
+  try {
+    if (typeof caPem !== 'string' || Buffer.byteLength(caPem, 'utf8') > 65_536) throw new Error();
+    // Accept one certificate only, never file paths, private keys, or a PEM bundle.
+    const match = /^-----BEGIN CERTIFICATE-----\r?\n([A-Za-z0-9+/=\r\n]+)\r?\n-----END CERTIFICATE-----$/.exec(caPem.trim());
+    if (!match) throw new Error();
+    const encoded = match[1].replace(/[\r\n]/g, ''), der = Buffer.from(encoded, 'base64');
+    if (der.toString('base64') !== encoded) throw new Error();
+    const certificate = new X509Certificate(der), now = Date.now();
+    if (!certificate.raw.equals(der) || !certificate.ca
+        || !(Date.parse(certificate.validFrom) <= now && now < Date.parse(certificate.validTo))) throw new Error();
+    return certificate.toString();
+  } catch { fail('INVALID_DATABASE_CA', 500); }
+}
+
+function poolConfig(databaseUrl, caPem) {
+  const ca = certificateAuthority(caPem);
   try {
     const url = new URL(databaseUrl);
     const local = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
@@ -22,7 +39,7 @@ function poolConfig(databaseUrl) {
         || (url.port && (!/^\d+$/.test(url.port) || Number(url.port) < 1 || Number(url.port) > 65_535))) {
       fail('INVALID_DATABASE_CONFIGURATION', 500);
     }
-    if (!local && url.searchParams.has('sslmode')
+    if ((!local || ca) && url.searchParams.has('sslmode')
         && !['require', 'verify-ca', 'verify-full'].includes(url.searchParams.get('sslmode'))) {
       fail('DATABASE_TLS_REQUIRED', 500);
     }
@@ -30,7 +47,8 @@ function poolConfig(databaseUrl) {
     // an ssl object; no URL parameter may disable certificate verification here.
     return { host: url.hostname.replace(/^\[|\]$/g, ''), port: Number(url.port || 5432),
       database: decodeURIComponent(url.pathname.slice(1)), user: decodeURIComponent(url.username),
-      password: decodeURIComponent(url.password), ssl: local ? false : { rejectUnauthorized: true },
+      password: decodeURIComponent(url.password),
+      ssl: ca ? { rejectUnauthorized: true, ca } : local ? false : { rejectUnauthorized: true },
       max: 5, connectionTimeoutMillis: 8_000, idleTimeoutMillis: 10_000,
       query_timeout: 15_000, statement_timeout: 10_000, application_name: 'floww-runtime' };
   } catch (error) {
@@ -41,8 +59,8 @@ function poolConfig(databaseUrl) {
 
 /** Isolated-schema durable state; never mutates the legacy/team public schema. */
 export class PostgresStore {
-  static async open(databaseUrl, { clock = Date.now, pool, poolFactory = config => new pg.Pool(config) } = {}) {
-    const config = poolConfig(databaseUrl);
+  static async open(databaseUrl, { clock = Date.now, caPem, pool, poolFactory = config => new pg.Pool(config) } = {}) {
+    const config = poolConfig(databaseUrl, caPem);
     if (typeof clock !== 'function' || typeof poolFactory !== 'function') fail('INVALID_DATABASE_CONFIGURATION', 500);
     const ownsPool = !pool;
     let selected;
@@ -55,8 +73,11 @@ export class PostgresStore {
     try {
       await store.transaction(async client => {
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended('floww_runtime.schema.v1', 0))");
-        await client.query(`CREATE SCHEMA IF NOT EXISTS floww_runtime;
-          CREATE TABLE IF NOT EXISTS floww_runtime.challenges (
+        // CREATE SCHEMA IF NOT EXISTS still requires database CREATE permission.
+        // A managed database may pre-provision this schema for a limited login.
+        const schema = await client.query('SELECT oid FROM pg_catalog.pg_namespace WHERE nspname=$1', ['floww_runtime']);
+        if (schema.rows.length === 0) await client.query('CREATE SCHEMA floww_runtime');
+        await client.query(`CREATE TABLE IF NOT EXISTS floww_runtime.challenges (
             id TEXT PRIMARY KEY, wallet TEXT NOT NULL, message TEXT NOT NULL,
             expires BIGINT NOT NULL, created BIGINT NOT NULL, consumed BOOLEAN NOT NULL DEFAULT FALSE);
           CREATE TABLE IF NOT EXISTS floww_runtime.sessions (

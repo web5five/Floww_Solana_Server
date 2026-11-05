@@ -1,12 +1,14 @@
 import test, { before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID, createHash } from 'node:crypto';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { randomUUID, createHash, X509Certificate } from 'node:crypto';
+import { mkdtemp, mkdir, readFile, writeFile, chmod, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createServer } from 'node:net';
+import { rootCertificates } from 'node:tls';
 import path from 'node:path';
+import pg from 'pg';
 import { PostgresStore } from '../service/postgres-store.mjs';
 import { ServiceError } from '../service/config.mjs';
 
@@ -16,6 +18,35 @@ const clock = () => now;
 const owner = () => 'test-owner-' + randomUUID();
 const task = (wallet = owner()) => ({ id: randomUUID(), owner: wallet, events: [],
   operation: null, payment: 'NOT_STARTED', delivery: 'NOT_STARTED', count: 0 });
+const publicCA = rootCertificates.find(pem => {
+  const certificate = new X509Certificate(pem), time = Date.now();
+  return certificate.ca && Date.parse(certificate.validFrom) <= time && time < Date.parse(certificate.validTo);
+});
+
+async function localTLS(root) {
+  const caFile = path.join(root, 'ca.pem'), caKey = path.join(root, 'ca-key.pem');
+  const certFile = path.join(root, 'server.pem'), keyFile = path.join(root, 'server-key.pem');
+  const csr = path.join(root, 'server.csr'), extensions = path.join(root, 'server.ext');
+  const ssl = async (stage, args) => {
+    try { await exec('openssl', args, { timeout: 15_000 }); }
+    catch { throw new Error('LOCAL_TLS_' + stage + '_FAILED'); }
+  };
+  // These private keys belong only to this fresh, disposable local test cluster.
+  // exec captures OpenSSL output; no key or certificate is printed.
+  await ssl('CA', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2',
+    '-subj', '/CN=Floww Owned PostgreSQL Test CA', '-addext', 'basicConstraints=critical,CA:TRUE',
+    '-addext', 'keyUsage=critical,keyCertSign,cRLSign', '-keyout', caKey, '-out', caFile]);
+  await ssl('REQUEST', ['req', '-new', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=127.0.0.1',
+    '-keyout', keyFile, '-out', csr]);
+  await writeFile(extensions, 'basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=IP:127.0.0.1\n', { mode: 0o600 });
+  await ssl('SERVER', ['x509', '-req', '-in', csr, '-CA', caFile, '-CAkey', caKey,
+    '-CAcreateserial', '-days', '1', '-extfile', extensions, '-out', certFile]);
+  const expiredFile = path.join(root, 'expired-ca.pem');
+  await ssl('EXPIRY', ['x509', '-in', caFile, '-signkey', caKey, '-days', '0', '-out', expiredFile]);
+  await Promise.all([caKey, keyFile].map(file => chmod(file, 0o600)));
+  return { certFile, keyFile, caPem: await readFile(caFile, 'utf8'),
+    leafPem: await readFile(certFile, 'utf8'), expiredPem: await readFile(expiredFile, 'utf8') };
+}
 
 async function freePort() {
   const server = createServer();
@@ -33,6 +64,7 @@ async function localCluster() {
   const data = path.join(root, 'data'), socket = path.join(root, 'socket'), port = await freePort();
   await mkdir(socket, { mode: 0o700 });
   const control = path.join(bin, 'pg_ctl');
+  let tls;
   const stop = async () => {
     try { await exec(control, ['-D', data, '-m', 'fast', '-w', 'stop'], { timeout: 20_000 }); } catch {}
     let stopped = false;
@@ -45,14 +77,15 @@ async function localCluster() {
   try {
     await exec(path.join(bin, 'initdb'), ['-D', data, '--no-locale', '--encoding=UTF8',
       '--auth-local=trust', '--auth-host=trust', '--username=floww_test'], { timeout: 20_000 });
+    tls = await localTLS(root);
     await exec(control, ['-D', data, '-l', path.join(root, 'server.log'), '-w', '-o',
-      `-h 127.0.0.1 -p ${port} -k ${socket} -c shared_buffers=16MB -c max_connections=30`, 'start'], { timeout: 20_000 });
-  } catch {
+      `-h 127.0.0.1 -p ${port} -k ${socket} -c shared_buffers=16MB -c max_connections=30 -c ssl=on -c ssl_cert_file=${tls.certFile} -c ssl_key_file=${tls.keyFile}`, 'start'], { timeout: 20_000 });
+  } catch (error) {
     try { await stop(); } catch {}
-    throw new Error('LOCAL_POSTGRES_SETUP_FAILED');
+    throw new Error(/^LOCAL_TLS_[A-Z]+_FAILED$/.test(error.message) ? error.message : 'LOCAL_POSTGRES_SETUP_FAILED');
   }
   console.log('Started isolated PostgreSQL test cluster: ' + root);
-  return { root, url: `postgresql://floww_test@127.0.0.1:${port}/postgres`, stop };
+  return { root, url: `postgresql://floww_test@127.0.0.1:${port}/postgres`, ...tls, stop };
 }
 
 before(async () => {
@@ -73,6 +106,53 @@ after(async () => {
 const real = (name, fn) => test(name, async t => {
   if (unavailable) { t.skip(unavailable); return; }
   await fn(t);
+});
+
+real('PostgreSQL limited login initializes only a pre-provisioned admin-owned schema', async () => {
+  // All identifiers are generated locally, never request data. This fresh database
+  // and role exist only inside the owned disposable test cluster.
+  const suffix = randomUUID().replace(/-/g, '');
+  const role = 'floww_limited_' + suffix, database = 'floww_limited_db_' + suffix;
+  await first.pool.query(`CREATE ROLE ${role} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS`);
+  await first.pool.query(`CREATE DATABASE ${database}`);
+  await first.pool.query(`REVOKE ALL ON DATABASE ${database} FROM PUBLIC`);
+  await first.pool.query(`GRANT CONNECT ON DATABASE ${database} TO ${role}`);
+  const url = new URL(cluster.url);
+  url.username = role; url.pathname = '/' + database;
+  const admin = new pg.Pool({ host: '127.0.0.1', port: Number(url.port),
+    database, user: 'floww_test', password: '', ssl: false });
+  let limited, reopened;
+  try {
+    // No schema exists, and this login has no database CREATE permission.
+    // Initialization must fail without escalating permissions or using public.
+    await assert.rejects(PostgresStore.open(url.href, { clock, caPem: cluster.caPem }),
+      error => error.code === 'STATE_UNAVAILABLE' && error.message === 'STATE_UNAVAILABLE');
+    assert.equal((await admin.query("SELECT to_regnamespace('floww_runtime') AS namespace")).rows[0].namespace, null);
+    await admin.query(`CREATE SCHEMA floww_runtime AUTHORIZATION floww_test;
+      REVOKE ALL ON SCHEMA public FROM PUBLIC;
+      GRANT USAGE, CREATE ON SCHEMA floww_runtime TO ${role}`);
+    limited = await PostgresStore.open(url.href, { clock, caPem: cluster.caPem });
+    const permissions = await limited.pool.query(`SELECT
+      has_database_privilege(current_user,current_database(),'CREATE') AS database_create,
+      rolsuper,rolcreatedb,rolcreaterole,rolinherit,rolreplication,rolbypassrls
+      FROM pg_catalog.pg_roles WHERE rolname=current_user`);
+    assert.ok(Object.values(permissions.rows[0]).every(value => value === false));
+    const schemaOwner = await limited.pool.query(`SELECT r.rolname FROM pg_catalog.pg_namespace n
+      JOIN pg_catalog.pg_roles r ON r.oid=n.nspowner WHERE n.nspname=$1`, ['floww_runtime']);
+    assert.equal(schemaOwner.rows[0].rolname, 'floww_test');
+    await assert.rejects(limited.pool.query('CREATE SCHEMA floww_out_of_scope'), { code: '42501' });
+    await assert.rejects(limited.pool.query('CREATE TABLE public.floww_out_of_scope(id INTEGER)'), { code: '42501' });
+    const value = task(); await limited.add(value);
+    await limited.mutate(value.id, value.owner, current => { current.count = 7; });
+    reopened = await PostgresStore.open(url.href, { clock, caPem: cluster.caPem });
+    assert.equal((await reopened.get(value.id, value.owner)).count, 7);
+    assert.equal((await reopened.get(value.id, value.owner)).revision, 2);
+    const challenge = await reopened.challenge(value.owner, 'https://floww.example');
+    const session = await limited.authenticate(challenge.challengeId, value.owner, () => true, 60_000);
+    assert.equal((await reopened.session(session.token)).wallet, value.owner);
+  } finally {
+    await Promise.allSettled([limited?.close(), reopened?.close(), admin.end()]);
+  }
 });
 
 real('PostgreSQL challenge consumption is single-use across independent pools', async () => {
@@ -207,6 +287,82 @@ test('PostgreSQL remote TLS cannot be weakened by connection-string sslmode', as
   await assert.rejects(PostgresStore.open('postgresql://test-user:dummy-value@db.example.test/new-db?sslmode=disable', {
     poolFactory: () => { throw new Error('must not connect'); },
   }), { code: 'DATABASE_TLS_REQUIRED' });
+});
+test('PostgreSQL explicit CA is the only added trust and URL parameters cannot override it', async () => {
+  assert.ok(publicCA);
+  let captured;
+  const pool = fakePool(async () => ({ rows: [] }));
+  const url = 'postgresql://test-user@db.example.test/new-db?sslmode=require&sslrootcert=/not-read&sslcert=/not-read&sslkey=/not-read&ssl=false&rejectUnauthorized=false';
+  const store = await PostgresStore.open(url, {
+    caPem: '\n' + publicCA.replace(/\n/g, '\r\n') + '\n',
+    poolFactory: config => { captured = config; return pool; },
+  });
+  assert.deepEqual(captured.ssl, { rejectUnauthorized: true, ca: new X509Certificate(publicCA).toString() });
+  assert.equal(captured.connectionString, undefined);
+  assert.equal(captured.ssl.checkServerIdentity, undefined);
+  await store.close();
+  for (const sslmode of ['disable', 'allow', 'prefer', 'no-verify']) {
+    await assert.rejects(PostgresStore.open(url.replace('sslmode=require', 'sslmode=' + sslmode), {
+      caPem: publicCA, poolFactory: () => { assert.fail('TLS bypass must not construct a pool'); },
+    }), { code: 'DATABASE_TLS_REQUIRED' });
+  }
+});
+test('PostgreSQL unset CA preserves defaults and explicit loopback CA enforces TLS', async () => {
+  for (const caPem of [undefined, null, '']) {
+    for (const [host, expected] of [['127.0.0.1', false], ['db.example.test', { rejectUnauthorized: true }]]) {
+      let captured;
+      const store = await PostgresStore.open(`postgresql://test-user@${host}/new-db`, {
+        caPem, poolFactory: config => { captured = config; return fakePool(async () => ({ rows: [] })); },
+      });
+      assert.deepEqual(captured.ssl, expected); await store.close();
+    }
+  }
+  let captured;
+  const store = await PostgresStore.open('postgresql://test-user@127.0.0.1/new-db', {
+    caPem: publicCA, poolFactory: config => { captured = config; return fakePool(async () => ({ rows: [] })); },
+  });
+  assert.deepEqual(captured.ssl, { rejectUnauthorized: true, ca: new X509Certificate(publicCA).toString() });
+  await store.close();
+  await assert.rejects(PostgresStore.open('postgresql://test-user@127.0.0.1/new-db?sslmode=disable', {
+    caPem: publicCA, poolFactory: () => { assert.fail('explicit CA must not permit plaintext'); },
+  }), { code: 'DATABASE_TLS_REQUIRED' });
+});
+test('PostgreSQL malformed, bundled and oversized CA inputs fail before any connection', async () => {
+  const cert = new X509Certificate(publicCA);
+  const trailingDer = Buffer.concat([cert.raw, Buffer.from('unexpected')]).toString('base64');
+  const invalid = [' ', 'SECRET-not-a-certificate', '/private/not-read.pem', publicCA + publicCA,
+    '-----BEGIN PRIVATE KEY-----\nSECRET\n-----END PRIVATE KEY-----',
+    '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----',
+    `-----BEGIN CERTIFICATE-----\n${trailingDer}\n-----END CERTIFICATE-----`,
+    publicCA + ' '.repeat(65_536), 42, {}, Buffer.from(publicCA)];
+  for (const caPem of invalid) {
+    let created = false;
+    await assert.rejects(PostgresStore.open('postgresql://test-user@db.example.test/new-db', {
+      caPem, poolFactory: () => { created = true; return fakePool(async () => ({ rows: [] })); },
+    }), error => error.code === 'INVALID_DATABASE_CA' && error.message === 'INVALID_DATABASE_CA'
+      && !JSON.stringify(error).includes('SECRET'));
+    assert.equal(created, false);
+  }
+});
+real('PostgreSQL explicit CA verifies a real TLS connection and rejects the wrong authority', async () => {
+  const secure = await PostgresStore.open(cluster.url + '?sslmode=require&sslrootcert=/not-read', { caPem: cluster.caPem, clock });
+  try {
+    const result = await secure.pool.query('SELECT ssl,version FROM pg_stat_ssl WHERE pid=pg_backend_pid()');
+    assert.equal(result.rows[0].ssl, true); assert.match(result.rows[0].version, /^TLSv1\.[23]$/);
+    const wallet = owner(), challenge = await secure.challenge(wallet, 'https://floww.example');
+    assert.equal(typeof challenge.challengeId, 'string');
+  } finally { await secure.close(); }
+  await assert.rejects(PostgresStore.open(cluster.url, { caPem: publicCA }),
+    error => error.code === 'STATE_UNAVAILABLE' && error.message === 'STATE_UNAVAILABLE');
+});
+real('PostgreSQL non-CA and expired X509 certificates fail before connecting', async () => {
+  for (const caPem of [cluster.leafPem, cluster.expiredPem]) {
+    let created = false;
+    await assert.rejects(PostgresStore.open(cluster.url, {
+      caPem, poolFactory: () => { created = true; return fakePool(async () => ({ rows: [] })); },
+    }), { code: 'INVALID_DATABASE_CA' });
+    assert.equal(created, false);
+  }
 });
 test('PostgreSQL initialization and rollback failures release connections without raw secrets', async () => {
   const pool = fakePool(async () => { throw new Error('SECRET provider connection detail'); });

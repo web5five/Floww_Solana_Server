@@ -74,6 +74,7 @@ export function loadConfig(env = process.env) {
     secureCookies: originUrl.protocol === 'https:',
     dbPath: resolve(env.FLOWW_DB_PATH || '.runtime/floww.sqlite'),
     databaseUrl: env.DATABASE_URL || null,
+    databaseCaPem: env.DATABASE_CA_PEM || null,
     rpcUrl: endpoint(env.SOLANA_RPC_URL || 'https://api.devnet.solana.com'),
     facilitatorUrl: endpoint(env.X402_FACILITATOR_URL || 'https://x402.org/facilitator'),
     merchantOrigin: origin, merchantBaseUrl: origin + '/merchant/reports',
