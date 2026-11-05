@@ -1,6 +1,41 @@
 # Floww_Solana_Server
 Backend, AI orchestration, authorization policies and Solana x402 integration.
 
+## Integration service
+
+The `service/` runtime adds signed wallet login, private persistent tasks, exact
+Devnet purchase approvals, official x402/SVM transport, RPC transfer reports and
+a responsive browser workspace. It builds on the AI reference below; it does
+not replace the legacy EVM services or assert a shared team API agreement.
+
+```sh
+npm ci --ignore-scripts
+npm start
+```
+
+Open `http://127.0.0.1:4318`. Defaults bind only to loopback, use a private local
+SQLite file and disable payments. See [.env.example](.env.example) for settings;
+the process reads environment variables, not an automatically loaded `.env`.
+Without a merchant and opt-in test payer, health correctly reports not ready.
+The login wallet identifies the owner; an explicitly approved Devnet service
+wallet is the payment source.
+
+```sh
+npm run check
+FLOWW_REQUIRE_POSTGRES_TESTS=true npm test
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=reference python3 -m unittest discover -s reference/tests -v
+```
+
+The required PostgreSQL checks start and remove their own isolated cluster using
+existing non-root PostgreSQL binaries. Runtime tests use scripted transports and
+real loopback HTTP/process/DB behavior; they do not prove external settlement.
+Actual model calls, wallet acceptance and cloud deployment remain distinct.
+
+See the [API contract](docs/integration/API.md), [payment transport](docs/integration/X402.md),
+[report/AI integration](docs/integration/PROVIDER_AI.md),
+[deployment setup](docs/integration/DEPLOYMENT.md) and
+[verification record](docs/integration/VERIFICATION.md).
+
 ## AI baseline reference
 
 [AI-01 workflow and acceptance mapping](docs/ai/AI-01_WORKFLOW.md) documents the

@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="목적에 맞는 자료를 요청하고, 승인한 조건과 결제·결과를 확인하는 Floww 워크스페이스">
+  <title>Floww · 자료 실행 워크스페이스</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">워크스페이스로 건너뛰기</a>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="Floww 홈">
+      <svg class="brand-symbol" viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="11" fill="currentColor"/><path d="M10 12h16M10 18h12M10 24h7" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>
+      <span>Floww<span class="brand-dot">.</span></span>
+    </a>
+    <span class="header-context">자료 실행 워크스페이스</span>
+    <div class="header-actions">
+      <span class="network-pill"><span class="network-dot"></span>Solana Devnet</span>
+      <button id="connect-wallet" type="button" class="button button-dark">지갑 연결</button>
+      <button id="logout" type="button" class="button button-quiet" hidden>로그아웃</button>
+    </div>
+  </header>
+
+  <main id="workspace" class="workspace" tabindex="-1">
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <p class="eyebrow">INTENT → APPROVAL → RESULT</p>
+        <h1 id="page-title">원하는 자료를 요청하고,<br>실행의 흐름을 확인하세요.</h1>
+        <p class="intro-copy">지갑 이체 분석을 시작하세요. 결제 조건을 직접 확인하고 승인한 뒤,<br class="desktop-break"> 결제와 자료 전달, 분석 결과를 각각 살펴볼 수 있습니다.</p>
+      </div>
+      <div class="intro-status" aria-live="polite">
+        <span class="status-icon" aria-hidden="true">↗</span>
+        <div><span class="tiny-label">실행 환경</span><strong id="health-status">설정 상태 확인 중</strong><p id="health-detail">현재 Devnet 환경을 확인하고 있습니다.</p></div>
+      </div>
+    </section>
+
+    <div id="notice" class="notice" role="alert" hidden><span id="notice-text"></span><button id="dismiss-notice" type="button" aria-label="알림 닫기">×</button></div>
+    <p id="live-status" class="sr-only" aria-live="polite"></p>
+
+    <div class="workspace-grid">
+      <aside class="request-column" aria-label="자료 요청과 내 기록">
+        <section class="panel request-panel" aria-labelledby="request-title">
+          <div class="section-heading"><span class="step-number">01</span><h2 id="request-title">새 자료 요청</h2></div>
+          <p class="section-copy">분석할 지갑과 기간을 정해 주세요.</p>
+          <form id="request-form">
+            <label for="purpose">요청 목적</label>
+            <textarea id="purpose" name="purpose" rows="3" maxlength="2000" required>지갑의 이체 내역을 분석하고 자산별 입출금을 정리해 주세요.</textarea>
+            <label for="report-wallet">분석할 Solana 지갑</label>
+            <input id="report-wallet" name="wallet" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Solana 지갑 주소" maxlength="44" required>
+            <div class="field-heading"><label for="window-start">조회 기간</label><span class="field-hint">최대 7일</span></div>
+            <div class="date-fields"><div><label class="sub-label" for="window-start">시작 · 현지 시간</label><input id="window-start" name="windowStart" type="datetime-local" step="1" required></div><div><label class="sub-label" for="window-end">종료 · 현지 시간</label><input id="window-end" name="windowEnd" type="datetime-local" step="1" required></div></div>
+            <p class="input-note">분석 지갑과 로그인 지갑은 다를 수 있습니다. 결제는 승인 화면에 표시된 Devnet 서비스 지갑에서 이루어집니다.</p>
+            <button id="create-task" class="button button-dark button-wide" type="submit" disabled>분석 요청 만들기 <span aria-hidden="true">↗</span></button>
+          </form>
+          <p id="login-hint" class="login-hint">지갑을 연결하고 로그인하면 시작할 수 있어요.</p>
+        </section>
+
+        <section class="panel history-panel" aria-labelledby="history-title">
+          <div class="section-heading history-heading"><h2 id="history-title">내 요청</h2><span id="task-count" class="count">0</span><button id="refresh-tasks" class="text-button" type="button" disabled>새로고침</button></div>
+          <div id="history-empty" class="history-empty"><span aria-hidden="true">＋</span><p>첫 번째 자료 요청을<br>만들어 보세요.</p></div>
+          <div id="task-list" class="task-list" aria-label="내 분석 요청 목록"></div>
+        </section>
+      </aside>
+
+      <section class="execution-column" aria-label="실행 상태와 분석 결과">
+        <div id="selection-empty" class="panel selection-empty">
+          <div class="empty-orbit" aria-hidden="true"><span>↗</span><i></i><i></i><i></i></div>
+          <p class="eyebrow">YOUR NEXT FLOW</p><h2>요청에서 결과까지,<br>한곳에서 이어집니다.</h2>
+          <p>왼쪽에서 새 요청을 만들거나<br>기존 요청을 선택해 주세요.</p>
+          <ol class="empty-steps"><li><span>1</span>자료 요청</li><li><span>2</span>조건 승인</li><li><span>3</span>실행과 결과 확인</li></ol>
+        </div>
+
+        <div id="selection-content" hidden>
+          <section class="panel execution-panel" aria-labelledby="execution-title">
+            <div class="execution-heading"><div><p class="eyebrow">CURRENT REQUEST</p><h2 id="execution-title">선택한 요청</h2></div><span id="task-state" class="state-pill">대기</span></div>
+            <p id="task-meta" class="task-meta"></p>
+            <div class="state-grid" aria-label="승인, 결제, 자료 전달 상태"><div><span class="tiny-label">권한 확인</span><strong id="policy-state">대기</strong></div><div><span class="tiny-label">결제</span><strong id="payment-state">시작 전</strong></div><div><span class="tiny-label">자료 전달</span><strong id="delivery-state">시작 전</strong></div></div>
+            <p id="task-guidance" class="guidance"></p>
+            <div id="quote-summary" class="quote-summary" hidden><div class="quote-price"><span class="tiny-label">이 자료의 결제 금액</span><strong id="quote-price"></strong><span id="quote-atomic" class="muted"></span></div><dl id="quote-details" class="details-grid"></dl></div>
+            <div id="proposal-note" class="proposal-note" hidden></div>
+
+            <form id="approval-form" class="approval-form" hidden>
+              <div class="section-heading"><span class="step-number">02</span><h3>결제 조건 승인</h3></div>
+              <div class="approval-fields"><div><label for="budget">최대 지출 한도 · 기본 단위</label><input id="budget" type="text" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" required></div><div><label for="approval-expiry">승인 기한 · 현지 시간</label><input id="approval-expiry" type="datetime-local" step="1" required></div></div>
+              <label class="check-label" for="approval-ack"><input id="approval-ack" type="checkbox" required><span>표시된 수신자·토큰·금액과 기한에 동의하며, Devnet 서비스 지갑의 결제를 승인합니다.</span></label>
+              <button id="approve-task" class="button button-dark" type="submit">이 조건으로 승인</button>
+            </form>
+            <p id="approval-status" class="approval-status" hidden></p>
+            <div class="task-actions"><button id="quote-task" class="button button-dark" type="button">결제 조건 확인</button><button id="execute-task" class="button button-accent" type="button" hidden>승인한 결제 실행 <span aria-hidden="true">↗</span></button><button id="reconcile-task" class="button button-dark" type="button" hidden>원래 결제 상태 확인</button><button id="recover-task" class="button button-dark" type="button" hidden>같은 결제로 자료 다시 받기</button><button id="revoke-task" class="button button-quiet" type="button" hidden>승인 취소</button><button id="refresh-task" class="button button-quiet" type="button">상태 새로고침</button></div>
+            <p id="action-status" class="action-status" aria-live="polite"></p>
+          </section>
+
+          <div class="results-grid">
+            <section class="panel timeline-panel" aria-labelledby="timeline-title"><div class="section-heading"><span class="step-number">03</span><h2 id="timeline-title">실행 기록</h2></div><ol id="timeline" class="timeline"></ol><div id="transaction-wrap" class="transaction-wrap" hidden><span class="tiny-label">확인된 거래</span><a id="transaction-link" target="_blank" rel="noopener noreferrer"></a></div></section>
+            <section class="panel result-panel" aria-labelledby="result-title"><div class="section-heading result-heading"><h2 id="result-title">분석 결과</h2><button id="download-report" class="text-button" type="button" hidden>보고서 저장 ↓</button></div><div id="result-empty" class="result-empty"><span aria-hidden="true">≋</span><p>자료 전달이 확인되면<br>분석 결과가 여기에 나타납니다.</p></div><div id="result-content" hidden></div></section>
+          </div>
+        </div>
+      </section>
+    </div>
+    <footer class="site-footer"><span>FLOWW · PURPOSE BEFORE PAYMENT</span><span>Devnet 결제와 실제 자료 조회를 구분해 표시합니다.</span></footer>
+  </main>
+</body>
+</html>

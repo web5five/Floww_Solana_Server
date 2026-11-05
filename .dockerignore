@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!service/
+!service/**
+!reference/
+!reference/ai_baseline/
+!reference/ai_baseline/**
+**/__pycache__/
+**/*.pyc
+**/.env*
+**/*.sqlite*
