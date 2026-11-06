@@ -43,7 +43,7 @@ async function fixture(t, scenario) {
     reconcile: async () => { calls.reconcile++; return forbidden(); },
   };
   // These legacy metadata labels are required by the interface, not evidence of a live model.
-  const metadata = { modelVersion: config.model, promptVersion: 'workspace/v4' };
+  const metadata = { modelVersion: config.model, promptVersion: 'workspace/v5' };
   const planner = {
     refine: async input => {
       calls.refine++;

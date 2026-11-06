@@ -68,14 +68,23 @@ language compliance, faithful recovery and accurate critic explanations need
 actual samples and semantic review. A canonical suffix or critic `ACCEPT`
 cannot prove them.
 
-The current `workspace/v4` refiner follows a short ordered contract: current
-goal, exact user-derived scope anchors, missing fields recomputed from returned
-nulls, then status. The schema fixes wallet/start/end to those anchors, including
+The current `workspace/v5` refiner follows a short ordered contract: current
+goal, exact user-derived scope anchors, then status. Its internal intent contains
+exactly five nullable fields. The schema fixes wallet/start/end to those anchors, including
 null when unresolved. The validator rejects clearing a known anchor, inventing
-an unknown one, contradictory missing fields and asking for clarification when
+an unknown one and asking for clarification when
 the scope is already valid and complete. It never changes such a response into
 `READY_TO_PLAN`. A submillisecond interval fails closed rather than being silently
 truncated into a different scope.
+
+The adapter owns the external `missingFields` array: it derives the list solely
+from the validated five values that are null. The public/stored six-field intent
+DTO is unchanged. A raw refiner `missingFields` property is forbidden, even if
+its value would be correct; it is never corrected or silently discarded. Empty
+raw strings are rejected rather than treated as new nulls. This removes a
+redundant model task; it is not evidence that the model learned to enumerate
+missing fields. Raw five-field role output and the derived external DTO stay
+separate in acceptance records.
 
 `currentUserMessage` repeats the exact latest normalized user text, excluding a
 trailing assistant reply. `temporalScope` is computed only from the explicit
@@ -117,12 +126,22 @@ interface-language probes passed with4 role calls. All42 POSTs had usage
 receipts; the conservative calculation was$0.06861075. The run took82.793seconds,
 without retries, provider uncertainty or artifact failure.
 
-Two Korean defects remain: a valid past interval was called future, and a
-supported transfer-only correction inherited an earlier unsupported refusal.
+Two Korean defects remained in that sample: a valid past interval was called
+future, and a supported transfer-only correction inherited an earlier unsupported refusal.
 The sample failed acceptance and was preserved before further changes.
 
+The version4 sample at source `92e20b1b9699af77f5a011f90f8d36b5acc24dc0`
+returned all40 core roles and4 interface-probe roles. Automated acceptance was
+11/12 cases and31/32 stages, with both probes passing and no blocked, guard-only
+or transport-failure stage. All44 POSTs had receipts; the conservative cost was
+$0.07873350 over85.623seconds. The earlier time/recovery defects were not observed,
+but one Korean clarification omitted the null time fields from its model-written
+missing list. Independent review also found two assistant-language mismatches
+despite correct final presentation options. This sample failed acceptance and
+is retained unchanged; version5's derived list does not reclassify it as success.
+
 The source corpus is
-[`workspace-live-acceptance-v4.json`](../../reference/evaluations/workspace-live-acceptance-v4.json).
+[`workspace-live-acceptance-v5.json`](../../reference/evaluations/workspace-live-acceptance-v5.json).
 Its original cases, rubric, expected labels, fixture facts and role denominators
 are unchanged. Its split is explicitly `post-baseline-regression`; the same
 examples are no longer an unseen acceptance set. The result also states that
@@ -158,9 +177,9 @@ transfer retrieval, model arithmetic, payment, microphone or public deployment
 acceptance. Actual-person review remains distinct from controller/agent review,
 consistent with [OpenAI's evaluation guidance](https://developers.openai.com/api/docs/guides/evaluation-best-practices).
 
-Version4 integration and actual-provider reevaluation are in progress. Before
+Version5 integration and actual-provider reevaluation are in progress. Before
 new provider calls, the controller binds the frozen evaluator and production
 sources, obtains independent source/supervisor review and keeps prior costs in
-the cumulative$1 authorization. The pre-version4 conservative total is
-$0.64627725, including a historical$0.45 reserve and all three retained samples.
+the cumulative$1 authorization. The pre-version5 conservative total is
+$0.72501075, including a historical$0.45 reserve and all four retained samples.
 Local checks, actual-provider results and exact-source CI remain separate gates.

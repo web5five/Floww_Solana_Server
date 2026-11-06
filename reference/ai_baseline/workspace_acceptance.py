@@ -25,11 +25,11 @@ from .workspace_cli import (
     RESOURCE, handle,
 )
 
-VERSION = "workspace-live-acceptance/v4"
+VERSION = "workspace-live-acceptance/v5"
 MODEL = "gpt-5.4-mini"
 BASELINE_SUITE_HASH = "1000fdca31768a038645e48f9d775e24c5556a66d244d952189ab1d461602295"
-PREVIOUS_SUITE_HASH = "332df2d374fc49e412e0c1f88bf3fb2f6df7cb655a74a8feea28410946b3e5be"
-DEFAULT_SUITE = Path(__file__).resolve().parents[1] / "evaluations" / "workspace-live-acceptance-v4.json"
+PREVIOUS_SUITE_HASH = "e9ac5f86a3de94df7beb90968d0aa6de3bd347ae102330c0068b9efdaa4284fc"
+DEFAULT_SUITE = Path(__file__).resolve().parents[1] / "evaluations" / "workspace-live-acceptance-v5.json"
 OPERATIONS = {"refine", "plan", "critic_probe"}
 _SECRET = re.compile(r"sk-[A-Za-z0-9_-]{12,}|Bearer\s+\S+|-----BEGIN[^\n]*PRIVATE KEY-----", re.I)
 _URL = re.compile(r"[a-z][a-z0-9+.-]*://|\bwww\.", re.I)
@@ -408,6 +408,8 @@ def run_suite(suite, *, model, execution_kind, model_name=MODEL, on_event=None):
         "previousRegressionSuiteHash": suite["previousRegressionSuiteHash"],
         "workflowPolicy": "plan-requires-latest-validated-ready-refiner",
         "validatedPurposeMayIncludeDeterministicUserOutputContract": True,
+        "missingFieldsSource": "derived_from_validated_null_fields",
+        "rawRefinerIntentContract": "five_fields_without_missingFields",
         "promptHash": _hash([REFINE_INSTRUCTION, PLAN_INSTRUCTION, CRITIC_INSTRUCTION]), "executionKind": execution_kind,
         "requiresExternalHardSupervisor": True, "costMeter": "external_actual_post_usage_and_conservative_reservations",
         "humanReviewed": False, "modelQualityAccepted": False,

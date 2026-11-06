@@ -46,7 +46,7 @@ def data_for(case):
 
 
 def refined(intent, status="READY_TO_PLAN"):
-    return {"status": status, "assistantText": "Scripted acceptance response.", "intent": intent}
+    return {"status": status, "assistantText": "Scripted acceptance response.", "intent": {key: value for key, value in intent.items() if key != "missingFields"}}
 
 
 def proposal():

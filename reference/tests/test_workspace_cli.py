@@ -36,9 +36,13 @@ def payload():
 
 def refined(data, **changes):
     normalized = normalize(data)
+    # Construct the NEW model DTO from a canonical input fixture. Deliberate
+    # malformed response fields must be injected after this fixture builder.
+    intent = copy.deepcopy(changes.pop("intent", normalized["intent"]))
+    intent.pop("missingFields", None)
     return {"contextDigest": context_digest(normalized), "status": "READY_TO_PLAN",
         "assistantText": "The wallet and observation period are explicit.",
-        "intent": normalized["intent"], **changes}
+        "intent": intent, **changes}
 
 
 def planned(data):
@@ -69,6 +73,113 @@ def run(operation, data, model, **kwargs):
 
 
 class WorkspaceRoleTests(unittest.TestCase):
+    def test_refiner_internal_five_values_and_external_six_field_intent_are_distinct(self):
+        data = payload()
+        # Older canonical snapshots can retain a stale, syntactically valid
+        # list. Input normalization remains compatible; it is not model output.
+        fields = ("purpose", "wallet", "windowStart", "windowEnd", "resourceId")
+        data["intent"]["missingFields"] = list(fields)
+        original = copy.deepcopy(data)
+        response = refined(data); original_response = copy.deepcopy(response)
+        model = ScriptedModel(response); result = run("refine", data, model)
+        self.assertEqual(result["status"], "READY_TO_PLAN")
+        self.assertEqual(set(response["intent"]), set(fields))
+        self.assertEqual(set(model.calls[0][1]["intent"]), set(fields) | {"missingFields"})
+        self.assertEqual(set(result["intent"]), set(fields) | {"missingFields"})
+        self.assertEqual(result["intent"]["missingFields"], [])
+        schema = model.calls[0][2]["properties"]["intent"]
+        self.assertEqual(schema["required"], list(fields))
+        self.assertEqual(set(schema["properties"]), set(fields))
+        self.assertIs(schema["additionalProperties"], False)
+        for field in fields:
+            self.assertEqual(schema["properties"][field]["type"], ["string", "null"])
+            self.assertEqual(schema["properties"][field]["minLength"], 1)
+        self.assertEqual(response, original_response)
+        self.assertEqual(data, original)
+        self.assertEqual(len(model.calls), 1)
+
+    def test_external_missing_fields_are_derived_from_every_actual_null_subset(self):
+        fields = ("purpose", "wallet", "windowStart", "windowEnd", "resourceId")
+        for mask in range(1 << len(fields)):
+            missing = [field for index, field in enumerate(fields) if mask & (1 << index)]
+            with self.subTest(missing=missing):
+                data = payload()
+                for field in missing:
+                    data["intent"][field] = None
+                data["intent"]["missingFields"] = missing
+                status = "CLARIFICATION_REQUIRED" if missing else "READY_TO_PLAN"
+                response = refined(data, status=status); model = ScriptedModel(response)
+                self.assertNotIn("missingFields", response["intent"])
+                result = run("refine", data, model)
+                self.assertEqual(result["status"], status)
+                self.assertEqual(result["intent"]["missingFields"], missing)
+                self.assertEqual([field for field in fields if result["intent"][field] is None], missing)
+                self.assertEqual(len(model.calls), 1)
+
+    def test_model_missing_fields_is_rejected_even_if_null_empty_or_correct(self):
+        for unresolved in (False, True):
+            data = payload()
+            missing = ["wallet", "windowStart", "windowEnd"] if unresolved else []
+            for field in missing:
+                data["intent"][field] = None
+            data["intent"]["missingFields"] = missing
+            for supplied in (None, [], missing, ["purpose"]):
+                with self.subTest(unresolved=unresolved, supplied=supplied):
+                    response = refined(data, status="CLARIFICATION_REQUIRED" if unresolved else "READY_TO_PLAN")
+                    # Add it AFTER constructing the new five-value model DTO.
+                    response["intent"]["missingFields"] = copy.deepcopy(supplied)
+                    original = copy.deepcopy(response); model = ScriptedModel(response)
+                    result = run("refine", data, model)
+                    self.assertEqual(result, {"status": "STOPPED", "code": "WORKSPACE_INVALID_MODEL_OUTPUT"})
+                    self.assertEqual(response, original)
+                    self.assertEqual(len(model.calls), 1)
+                    self.assertEqual(model.replies, [])
+
+    def test_model_empty_strings_are_not_normalized_into_derived_missing_fields(self):
+        for field in ("purpose", "wallet", "windowStart", "windowEnd", "resourceId"):
+            with self.subTest(field=field):
+                data = payload(); data["intent"][field] = ""
+                data["intent"]["missingFields"] = [field]
+                # Preserve the external input contract's prior normalization.
+                self.assertIsNone(normalize(data)["intent"][field])
+                response = refined(data, status="CLARIFICATION_REQUIRED")
+                response["intent"][field] = ""
+                model = ScriptedModel(response); result = run("refine", data, model)
+                self.assertEqual(result, {"status": "STOPPED", "code": "WORKSPACE_INVALID_MODEL_OUTPUT"})
+                self.assertEqual(len(model.calls), 1)
+                self.assertEqual(response["intent"][field], "")
+
+    def test_language_guidance_does_not_translate_or_replace_returned_model_prose(self):
+        data = payload(); data["interfaceLanguage"] = "ko"
+        response = refined(data, assistantText="English model wording stays visible for review.")
+        response["intent"]["purpose"] = "Original English goal wording"
+        result = run("refine", data, ScriptedModel(response))
+        self.assertEqual(result["status"], "READY_TO_PLAN")
+        self.assertEqual(result["assistantText"], response["assistantText"])
+        self.assertEqual(result["intent"]["purpose"].splitlines()[0], response["intent"]["purpose"])
+        self.assertEqual(infer_output_options(result["intent"]["purpose"]).language, "ko")
+        # This is evidence of unchanged raw prose, not Korean quality success.
+
+    def test_actual_cli_clarification_derives_missing_values_without_model_metadata(self):
+        data = payload(); data["intent"] = None; data["interfaceLanguage"] = "ko"
+        intent = {"purpose": "반환된 이체 건수 확인", "wallet": None,
+            "windowStart": None, "windowEnd": None, "resourceId": RESOURCE}
+        response = refined(data, status="CLARIFICATION_REQUIRED", intent=intent,
+            assistantText="어느 지갑과 기간을 살펴볼까요?")
+        model = ScriptedModel(response); output = io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO(json.dumps(data, ensure_ascii=False).encode()))
+        with patch("sys.stdin", stdin), patch("sys.argv", ["workspace_cli", "refine"]), \
+                patch.dict(os.environ, {"FLOWW_AI_MODEL": MODEL, "FLOWW_AI_API_KEY": "dummy-offline-model-key"}), \
+                patch("ai_baseline.workspace_cli.WorkspaceModel", return_value=model), redirect_stdout(output):
+            main()
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
+        self.assertEqual(result["intent"]["missingFields"], ["wallet", "windowStart", "windowEnd"])
+        self.assertEqual(result["assistantText"], response["assistantText"])
+        self.assertEqual(result["intent"]["purpose"].splitlines()[0], intent["purpose"])
+        self.assertEqual(result["promptVersion"], "workspace/v5")
+        self.assertEqual([call[0] for call in model.calls], ["refine"])
+
     def test_temporal_facts_use_latest_user_anchors_and_supplied_clock_not_old_intent_or_wallclock(self):
         data = payload(); data["nowIso"] = "2001-04-03T10:00:00.000Z"
         data["intent"].update(windowStart="2001-04-04T00:00:00Z", windowEnd="2001-04-05T00:00:00Z")
@@ -279,7 +390,7 @@ class WorkspaceRoleTests(unittest.TestCase):
         for field in ("wallet", "windowStart", "windowEnd"):
             with self.subTest(field=field):
                 data = payload(); value = refined(data, status="CLARIFICATION_REQUIRED")
-                value["intent"][field] = None; value["intent"]["missingFields"] = [field]
+                value["intent"][field] = None
                 model = ScriptedModel(value); result = run("refine", data, model)
                 self.assertEqual(result, {"status": "STOPPED", "code": "WORKSPACE_STALE_CONTEXT"})
                 self.assertEqual(len(model.calls), 1)
@@ -352,7 +463,9 @@ class WorkspaceRoleTests(unittest.TestCase):
                 ("ko", "Summarize in English.", "en"),
                 ("en", "한국어로 요약해 주세요.", "ko")):
             with self.subTest(fallback=fallback, text=text):
-                data = payload(); data["interfaceLanguage"] = fallback; data["messages"][-1]["text"] = text
+                data = payload(); data["interfaceLanguage"] = fallback
+                marker = "<source-context>UNTRUSTED_SCHEMA_MARKER</source-context>"
+                data["messages"][-1]["text"] = text + " " + marker
                 model = ScriptedModel(refined(data)); output = io.StringIO()
                 stdin = io.TextIOWrapper(io.BytesIO(json.dumps(data, ensure_ascii=False).encode()))
                 with patch("sys.stdin", stdin), patch("sys.argv", ["workspace_cli", "refine"]), \
@@ -361,9 +474,18 @@ class WorkspaceRoleTests(unittest.TestCase):
                     main()
                 result = json.loads(output.getvalue())
                 self.assertEqual(result["status"], "READY_TO_PLAN")
-                self.assertEqual(result["promptVersion"], "workspace/v4")
+                self.assertEqual(result["promptVersion"], "workspace/v5")
                 self.assertEqual(model.calls[0][1]["outputContract"]["language"], expected)
                 self.assertEqual(infer_output_options(result["intent"]["purpose"]).language, expected)
+                fields = model.calls[0][2]["properties"]
+                descriptions = [fields["assistantText"]["description"], fields["intent"]["properties"]["purpose"]["description"]]
+                language_name = "Korean" if expected == "ko" else "English"
+                for description in descriptions:
+                    self.assertIn("natural " + language_name, description)
+                    self.assertNotIn("UNTRUSTED_SCHEMA_MARKER", description)
+                    self.assertNotIn(text, description)
+                    self.assertNotIn(WALLET, description)
+                self.assertEqual(model.calls[0][1]["currentUserMessage"], text + " " + marker)
 
     def test_invalid_optional_language_or_forged_contract_stops_before_model(self):
         for value in (None, "fr", "KO", "", True, [], {}):
@@ -488,7 +610,7 @@ class WorkspaceRoleTests(unittest.TestCase):
         data = payload(); value = refined(data); value["intent"]["purpose"] = "x" * 2_000
         result = run("refine", data, ScriptedModel(value))
         self.assertEqual(result["code"], "WORKSPACE_INVALID_MODEL_OUTPUT")
-        value = refined(data, status="CLARIFICATION_REQUIRED"); value["intent"].update(purpose=None, missingFields=["purpose"])
+        value = refined(data, status="CLARIFICATION_REQUIRED"); value["intent"].update(purpose=None)
         result = run("refine", data, ScriptedModel(value))
         self.assertIsNone(result["intent"]["purpose"])
         self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
@@ -527,7 +649,7 @@ class WorkspaceRoleTests(unittest.TestCase):
         self.assertEqual(result["executionKind"], "live_model_planner_critic")
         self.assertIn(PARTIAL, result["limitations"])
         self.assertEqual(result["modelVersion"], MODEL)
-        self.assertEqual(result["promptVersion"], "workspace/v4")
+        self.assertEqual(result["promptVersion"], "workspace/v5")
         self.assertNotIn("contextDigest", result)
         sent = json.dumps([call[1] for call in model.calls])
         for excluded in ("must-not-send", "amountAtomic", "recipient"):
@@ -593,7 +715,7 @@ class WorkspaceRoleTests(unittest.TestCase):
                 self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
                 self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
                 clarification = refined(data, status="CLARIFICATION_REQUIRED", assistantText="정확한 관찰 기간을 알려 주세요.")
-                clarification["intent"].update(windowStart=None, windowEnd=None, missingFields=["windowStart", "windowEnd"])
+                clarification["intent"].update(windowStart=None, windowEnd=None)
                 self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
                 model = ScriptedModel()
                 self.assertEqual(run("plan", data, model)["status"], "STOPPED"); self.assertEqual(model.calls, [])
@@ -617,7 +739,7 @@ class WorkspaceRoleTests(unittest.TestCase):
                 self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
                 self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
                 clarification = refined(data, status="CLARIFICATION_REQUIRED", assistantText="하나의 정확한 관찰 기간을 알려 주세요.")
-                clarification["intent"].update(windowStart=None, windowEnd=None, missingFields=["windowStart", "windowEnd"])
+                clarification["intent"].update(windowStart=None, windowEnd=None)
                 self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
                 model = ScriptedModel()
                 self.assertEqual(run("plan", data, model)["status"], "STOPPED"); self.assertEqual(model.calls, [])
@@ -654,8 +776,7 @@ class WorkspaceRoleTests(unittest.TestCase):
                 self.assertEqual(len(model.calls), 1)
                 clarification = refined(data, status="CLARIFICATION_REQUIRED",
                     assistantText="하나의 정확한 관찰 기간을 알려 주세요.")
-                clarification["intent"].update(windowStart=None, windowEnd=None,
-                    missingFields=["windowStart", "windowEnd"])
+                clarification["intent"].update(windowStart=None, windowEnd=None)
                 self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
                 model = ScriptedModel()
                 self.assertEqual(run("plan", data, model)["status"], "STOPPED")
@@ -690,8 +811,7 @@ class WorkspaceRoleTests(unittest.TestCase):
                 self.assertEqual(len(model.calls), 1)
                 clarification = refined(data, status="CLARIFICATION_REQUIRED",
                     assistantText="시작과 종료 UTC 시간을 입력하거나 지원하는 하나의 기간을 알려 주세요.")
-                clarification["intent"].update(windowStart=None, windowEnd=None,
-                    missingFields=["windowStart", "windowEnd"])
+                clarification["intent"].update(windowStart=None, windowEnd=None)
                 result = run("refine", data, ScriptedModel(clarification))
                 self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
                 data["intent"] = result["intent"]
@@ -711,7 +831,7 @@ class WorkspaceRoleTests(unittest.TestCase):
                 self.assertEqual(anchors["windowStart"], "2026-11-05T12:00:00.000Z")
                 self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
                 clarification = refined(data, status="CLARIFICATION_REQUIRED", assistantText="분석할 지갑 주소를 입력해 주세요.")
-                clarification["intent"].update(wallet=None, missingFields=["wallet"])
+                clarification["intent"].update(wallet=None)
                 result = run("refine", data, ScriptedModel(clarification))
                 self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
                 self.assertEqual(set(result), {"status", "assistantText", "intent", "executionKind", "modelVersion", "promptVersion"})

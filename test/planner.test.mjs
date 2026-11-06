@@ -55,7 +55,7 @@ test('actual subprocess and loopback Responses transport perform refine, planner
       let value;
       if (role.endsWith('_refine')) {
         value = { contextDigest: data.contextDigest, status: 'READY_TO_PLAN',
-          assistantText: 'The wallet and observation period are explicit.', intent: data.intent };
+          assistantText: 'The wallet and observation period are explicit.', intent: Object.fromEntries(Object.entries(data.intent).filter(([key]) => key !== 'missingFields')) };
       } else if (role.endsWith('_plan')) {
         value = { contextDigest: data.contextDigest, summary: 'Inspect observed transfer activity.',
           steps: [{ role: 'planner', capability: RESOURCE, resourceId: RESOURCE, reason: 'Matches the explicit observation scope.' }],
@@ -117,7 +117,7 @@ test('real Python bridge binds UI fallback and explicit opposite-language prefer
       const body = JSON.parse(Buffer.concat(chunks)), data = JSON.parse(body.input[0].content[0].text);
       seen.push(data);
       const role = body.text.format.name;
-      const value = role.endsWith('_refine') ? { contextDigest: data.contextDigest, status: 'READY_TO_PLAN', assistantText: '선택한 범위의 이체를 정리할 수 있습니다.', intent: data.intent }
+      const value = role.endsWith('_refine') ? { contextDigest: data.contextDigest, status: 'READY_TO_PLAN', assistantText: '선택한 범위의 이체를 정리할 수 있습니다.', intent: Object.fromEntries(Object.entries(data.intent).filter(([key]) => key !== 'missingFields')) }
         : role.endsWith('_plan') ? { contextDigest: data.contextDigest, summary: '선택한 범위의 이체를 정리합니다.',
           steps: [{ role: 'planner', capability: RESOURCE, resourceId: RESOURCE, reason: '요청한 이체 내역을 확인합니다.' }], limitations: [] }
         : { contextDigest: data.contextDigest, verdict: 'ACCEPT', reason: '요청한 범위와 일치합니다.', issueCodes: [] };
@@ -203,7 +203,7 @@ test('credentials stay out of argv, unrelated environment, diagnostics and even 
     const source = 'import json,os,sys\n' +
       `open(${JSON.stringify(evidence)},'w').write(json.dumps({'argv':sys.argv,'env':dict(os.environ)}))\n` +
       "sys.stderr.write(os.environ['FLOWW_AI_API_KEY'])\n" +
-      `print(json.dumps({'status':'READY_TO_PLAN','assistantText':os.environ['FLOWW_AI_API_KEY'],'intent':${JSON.stringify(payload().intent).replaceAll('null', 'None')},'executionKind':'live_model_intent_refinement','modelVersion':os.environ['FLOWW_AI_MODEL'],'promptVersion':'workspace/v4'}))\n`;
+      `print(json.dumps({'status':'READY_TO_PLAN','assistantText':os.environ['FLOWW_AI_API_KEY'],'intent':${JSON.stringify(payload().intent).replaceAll('null', 'None')},'executionKind':'live_model_intent_refinement','modelVersion':os.environ['FLOWW_AI_MODEL'],'promptVersion':'workspace/v5'}))\n`;
     const python = await executable(directory, 'inspect', source);
     process.env.FLOWW_UNRELATED_SECRET_FOR_TEST = 'never-inherit';
     const escapedKey = 'dummy-"quoted\\credential';

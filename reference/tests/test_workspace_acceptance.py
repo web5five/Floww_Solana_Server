@@ -50,7 +50,7 @@ class ScriptedRoles:
             expected = case["stages"][index]["expected"]
             options = expected.get("outputOptions", {"language": case["inputLanguage"], "focus": "summary"})
             intent = {"purpose": purpose(options["language"], options["focus"]),
-                      **{key: expected[key] for key in ("wallet", "windowStart", "windowEnd", "resourceId", "missingFields")}}
+                      **{key: expected[key] for key in ("wallet", "windowStart", "windowEnd", "resourceId")}}
             return {"contextDigest": digest, "status": expected["status"], "intent": intent,
                     "assistantText": "실제 역할 포트 답변: 지갑 주소와 정확한 조회 기간을 알려 주세요." if options["language"] == "ko"
                     else "Scripted role response: which wallet and exact observation period should I use?"}
@@ -90,14 +90,14 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
         with self.assertRaises(acceptance.InvalidAcceptance):
             acceptance.validate_suite(value)
 
-    def test_v4_changes_only_version_prompt_and_previous_hash_while_v3_bytes_and_core_are_unchanged(self):
+    def test_v5_changes_only_version_prompt_and_previous_hash_while_v4_bytes_and_core_are_unchanged(self):
         v2 = ROOT / "evaluations" / "workspace-live-acceptance-v2.json"
         self.assertEqual(hashlib.sha256(v2.read_bytes()).hexdigest(), "e7075803eac9a34866d07a68ff45bafae4876f16d69b4591ea646c1a371f3a3b")
-        previous = ROOT / "evaluations" / "workspace-live-acceptance-v3.json"
-        self.assertEqual(hashlib.sha256(previous.read_bytes()).hexdigest(), "d401b7ab4f42e8df76fb9372e857d968573921d7b504e69a217316d19ccfd655")
+        previous = ROOT / "evaluations" / "workspace-live-acceptance-v4.json"
+        self.assertEqual(hashlib.sha256(previous.read_bytes()).hexdigest(), "708927cb401f65f84056685cc620a711fe16e6f641c789dbbd53eb4d7a550129")
         v2 = json.loads(previous.read_text())
         self.assertEqual(acceptance._hash(v2), acceptance.PREVIOUS_SUITE_HASH)
-        expected = copy.deepcopy(v2); expected.update(version="workspace-live-acceptance/v4", promptVersion="workspace/v4",
+        expected = copy.deepcopy(v2); expected.update(version="workspace-live-acceptance/v5", promptVersion="workspace/v5",
             previousRegressionSuiteHash=acceptance.PREVIOUS_SUITE_HASH)
         self.assertEqual(self.suite, expected)
         for field in ("cases", "grounding", "rubric", "expectedRoleCounts"):
@@ -115,6 +115,9 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
         self.assertEqual(report["totals"]["automatedPassedStages"], 32)
         self.assertEqual(report["totals"]["automatedFailedStages"], 0)
         self.assertFalse(report["modelQualityAccepted"]); self.assertFalse(report["humanReviewed"])
+        self.assertEqual(report["missingFieldsSource"], "derived_from_validated_null_fields")
+        self.assertTrue(all("missingFields" not in role["output"]["intent"]
+            for role in report["roles"] if role["role"] == "refine"))
         self.assertTrue(report["requiresExternalHardSupervisor"])
         self.assertTrue(all(stage["qualitativeReview"]["status"] == "PENDING" for case in report["cases"] for stage in case["stages"]))
 
@@ -189,7 +192,7 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
             if role == "refine" and case["id"] == "ko-long-context-correction" and data["messages"][-1]["id"].endswith("-user-1"):
                 expected = case["stages"][1]["expected"]
                 return {"contextDigest": data["contextDigest"], "status": "READY_TO_PLAN", "assistantText": "Actual injected wrong-language response.",
-                        "intent": {"purpose": purpose("en", "outgoing"), **{key: expected[key] for key in ("wallet", "windowStart", "windowEnd", "resourceId", "missingFields")}}}
+                        "intent": {"purpose": purpose("en", "outgoing"), **{key: expected[key] for key in ("wallet", "windowStart", "windowEnd", "resourceId")}}}
         model.override = override
         report, _ = self.run_suite(model)
         case = next(case for case in report["cases"] if case["id"] == "ko-long-context-correction")
