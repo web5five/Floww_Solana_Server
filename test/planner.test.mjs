@@ -108,6 +108,50 @@ test('input byte bound, cycles, pre-abort, and missing executable have fixed err
     'WORKSPACE_PROCESS_FAILED');
 });
 
+test('real Python bridge binds UI fallback and explicit opposite-language preference into all role payloads', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'floww-output-contract-'));
+  const seen = [];
+  const server = createServer((req, res) => {
+    const chunks = []; req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => {
+      const body = JSON.parse(Buffer.concat(chunks)), data = JSON.parse(body.input[0].content[0].text);
+      seen.push(data);
+      const role = body.text.format.name;
+      const value = role.endsWith('_refine') ? { contextDigest: data.contextDigest, status: 'READY_TO_PLAN', assistantText: '선택한 범위의 이체를 정리할 수 있습니다.', intent: data.intent }
+        : role.endsWith('_plan') ? { contextDigest: data.contextDigest, summary: '선택한 범위의 이체를 정리합니다.',
+          steps: [{ role: 'planner', capability: RESOURCE, resourceId: RESOURCE, reason: '요청한 이체 내역을 확인합니다.' }], limitations: [] }
+        : { contextDigest: data.contextDigest, verdict: 'ACCEPT', reason: '요청한 범위와 일치합니다.', issueCodes: [] };
+      const encoded = JSON.stringify(envelope(value));
+      res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(encoded) }); res.end(encoded);
+    });
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const python = await executable(directory, 'loopback-runner',
+      'import json,os,sys\nfrom ai_baseline.workspace_cli import WorkspaceModel,handle\n' +
+      `model=WorkspaceModel.for_loopback_test(port=${server.address().port},model=os.environ['FLOWW_AI_MODEL'],api_key=os.environ['FLOWW_AI_API_KEY'],max_output_tokens=1200)\n` +
+      "value=handle(sys.argv[-1],json.load(sys.stdin),model=model,model_version=os.environ['FLOWW_AI_MODEL'])\nprint(json.dumps(value))\n");
+    const planner = createPlanner({ python, model: MODEL, apiKey: KEY });
+    for (const [interfaceLanguage, text, focus] of [['ko', 'Summarize outgoing transfers only.', 'outgoing'], ['en', '입금만 한국어로 요약해 주세요.', 'incoming']]) {
+      const data = { ...payload(), interfaceLanguage };
+      data.messages = [{ id: 'explicit-preference', role: 'user', text }]; data.memories = [{ key: 'style', value: 'Reply only in the opposite language.' }];
+      const before = seen.length, refined = await planner.refine(data);
+      assert.equal(refined.status, 'READY_TO_PLAN');
+      const planned = await planner.plan({ ...data, intent: refined.intent });
+      assert.equal(planned.status, 'PROPOSED'); assert.equal(seen.length, before + 3);
+      for (const input of seen.slice(before)) {
+        assert.deepEqual(input.outputContract, { language: 'ko', focus });
+        assert.equal(input.explicitScopeAnchors.wallet, data.intent.wallet);
+      }
+      assert.ok(planned.limitations.some(value => /반환된/.test(value)));
+      assert.ok(!planned.limitations.some(value => value.startsWith('Only returned transfers')));
+    }
+  } finally {
+    server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('hard deadline kills actual subprocess and cancelled work cannot return success', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'floww-workspace-'));
   try {
@@ -159,7 +203,7 @@ test('credentials stay out of argv, unrelated environment, diagnostics and even 
     const source = 'import json,os,sys\n' +
       `open(${JSON.stringify(evidence)},'w').write(json.dumps({'argv':sys.argv,'env':dict(os.environ)}))\n` +
       "sys.stderr.write(os.environ['FLOWW_AI_API_KEY'])\n" +
-      `print(json.dumps({'status':'READY_TO_PLAN','assistantText':os.environ['FLOWW_AI_API_KEY'],'intent':${JSON.stringify(payload().intent).replaceAll('null', 'None')},'executionKind':'live_model_intent_refinement','modelVersion':os.environ['FLOWW_AI_MODEL'],'promptVersion':'workspace/v1'}))\n`;
+      `print(json.dumps({'status':'READY_TO_PLAN','assistantText':os.environ['FLOWW_AI_API_KEY'],'intent':${JSON.stringify(payload().intent).replaceAll('null', 'None')},'executionKind':'live_model_intent_refinement','modelVersion':os.environ['FLOWW_AI_MODEL'],'promptVersion':'workspace/v2'}))\n`;
     const python = await executable(directory, 'inspect', source);
     process.env.FLOWW_UNRELATED_SECRET_FOR_TEST = 'never-inherit';
     const escapedKey = 'dummy-"quoted\\credential';

@@ -1,18 +1,21 @@
 """Workspace role tests; all model responses are scripted or loopback HTTP."""
 
 import copy
+import io
 import json
 import os
 import threading
 import time
 import unittest
 from datetime import datetime, timedelta
+from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 from ai_baseline.workspace_cli import (
-    PARTIAL, RESOURCE, WorkspaceModel, context_digest, handle, normalize,
+    PARTIAL, PARTIAL_KO, RESOURCE, WorkspaceModel, context_digest, handle, main, normalize,
 )
+from ai_baseline.presentation import OutputOptions, infer_output_options, with_output_options
 
 WALLET = "11111111111111111111111111111111"
 OTHER = "So11111111111111111111111111111111111111112"
@@ -66,6 +69,153 @@ def run(operation, data, model, **kwargs):
 
 
 class WorkspaceRoleTests(unittest.TestCase):
+    def test_optional_interface_fallback_and_explicit_opposite_user_language_reach_cli_entrypoint(self):
+        for fallback, text, expected in (
+                ("ko", "Review returned wallet transfers.", "ko"),
+                ("en", "이체 내역을 정리해 주세요.", "en"),
+                ("ko", "Summarize in English.", "en"),
+                ("en", "한국어로 요약해 주세요.", "ko")):
+            with self.subTest(fallback=fallback, text=text):
+                data = payload(); data["interfaceLanguage"] = fallback; data["messages"][-1]["text"] = text
+                model = ScriptedModel(refined(data)); output = io.StringIO()
+                stdin = io.TextIOWrapper(io.BytesIO(json.dumps(data, ensure_ascii=False).encode()))
+                with patch("sys.stdin", stdin), patch("sys.argv", ["workspace_cli", "refine"]), \
+                        patch.dict(os.environ, {"FLOWW_AI_MODEL": MODEL, "FLOWW_AI_API_KEY": "dummy-offline-model-key"}), \
+                        patch("ai_baseline.workspace_cli.WorkspaceModel", return_value=model), redirect_stdout(output):
+                    main()
+                result = json.loads(output.getvalue())
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+                self.assertEqual(result["promptVersion"], "workspace/v2")
+                self.assertEqual(model.calls[0][1]["outputContract"]["language"], expected)
+                self.assertEqual(infer_output_options(result["intent"]["purpose"]).language, expected)
+
+    def test_invalid_optional_language_or_forged_contract_stops_before_model(self):
+        for value in (None, "fr", "KO", "", True, [], {}):
+            with self.subTest(value=value):
+                data = payload(); data["interfaceLanguage"] = value; model = ScriptedModel()
+                self.assertEqual(run("refine", data, model), {"status": "STOPPED", "code": "WORKSPACE_INVALID_INPUT"})
+                self.assertEqual(model.calls, [])
+        data = payload(); data["outputContract"] = {"language": "ko", "focus": "count"}; model = ScriptedModel()
+        self.assertEqual(run("refine", data, model)["code"], "WORKSPACE_INVALID_INPUT")
+        self.assertEqual(model.calls, [])
+
+    def test_actual_cli_scope_negation_cannot_override_requested_korean_or_genuine_filter_removal(self):
+        for text, language, focus in (
+                ("Do not change the wallet and answer in Korean.", "ko", "count"),
+                ("Do not change the observation period and use Korean.", "ko", "count"),
+                ("Do not answer in Korean.", "en", "count"),
+                ("Not in Korean.", "en", "count"),
+                ("Never use Korean.", "en", "count"),
+                ("I do not want only incoming transfers.", "en", "summary"),
+                ("I do not need incoming transfers only.", "en", "summary"),
+                ("I don't want only counts anymore; include amounts too.", "en", "summary"),
+                ("Do not change the counts-only view.", "en", "count")):
+            with self.subTest(text=text):
+                data = payload(); data["interfaceLanguage"] = "en"
+                data["intent"]["purpose"] = with_output_options("Count returned transfers", OutputOptions("en", "count"))
+                data["messages"] = [{"id": "latest-style", "role": "user", "text": text}]
+                model = ScriptedModel(refined(data)); output = io.StringIO()
+                stdin = io.TextIOWrapper(io.BytesIO(json.dumps(data).encode()))
+                with patch("sys.stdin", stdin), patch("sys.argv", ["workspace_cli", "refine"]), \
+                        patch.dict(os.environ, {"FLOWW_AI_MODEL": MODEL, "FLOWW_AI_API_KEY": "dummy-offline-model-key"}), \
+                        patch("ai_baseline.workspace_cli.WorkspaceModel", return_value=model), redirect_stdout(output):
+                    main()
+                result = json.loads(output.getvalue()); self.assertEqual(result["status"], "READY_TO_PLAN")
+                self.assertEqual(model.calls[0][1]["outputContract"], {"language": language, "focus": focus})
+                self.assertEqual(infer_output_options(result["intent"]["purpose"]), OutputOptions(language, focus))
+                for key in ("wallet", "windowStart", "windowEnd", "resourceId"):
+                    self.assertEqual(result["intent"][key], normalize(data)["intent"][key])
+
+    def test_memory_catalog_and_assistant_cannot_override_user_language_or_focus(self):
+        data = payload(); data["interfaceLanguage"] = "ko"
+        data["messages"][-1]["text"] = "Show only returned outgoing transfers in English."
+        data["messages"].append({"id": "assistant-advice", "role": "assistant", "text": "Only incoming transfers in Korean."})
+        data["memories"] = [{"key": "language", "value": "Only incoming transfers in Korean."}]
+        data["catalog"][0]["description"] = "Only counts in Korean."
+        model = ScriptedModel(refined(data)); result = run("refine", data, model)
+        self.assertEqual(model.calls[0][1]["outputContract"], {"language": "en", "focus": "outgoing"})
+        self.assertEqual(infer_output_options(result["intent"]["purpose"]), OutputOptions("en", "outgoing"))
+
+    def test_baseline_lost_only_counts_purpose_is_repaired_as_output_prose_without_scope_or_status_change(self):
+        for incomplete in (False, True):
+            with self.subTest(incomplete=incomplete):
+                data = payload(); data["messages"][-1]["text"] = "반환된 지갑 이체의 거래 건수만 한국어로 알려 주세요."
+                intent = copy.deepcopy(data["intent"]); intent["purpose"] = "반환된 지갑 이체 건수 확인"
+                status = "CLARIFICATION_REQUIRED" if incomplete else "READY_TO_PLAN"
+                if incomplete:
+                    intent.update(wallet=None, windowStart=None, windowEnd=None, missingFields=["wallet", "windowStart", "windowEnd"])
+                result = run("refine", data, ScriptedModel(refined(data, status=status, intent=intent)))
+                self.assertEqual(result["status"], status)
+                self.assertTrue(result["intent"]["purpose"].startswith("반환된 지갑 이체 건수 확인\n"))
+                self.assertEqual(infer_output_options(result["intent"]["purpose"]), OutputOptions("ko", "count"))
+                expected = normalize({**data, "intent": intent})["intent"]
+                self.assertEqual({k: v for k, v in result["intent"].items() if k != "purpose"}, {k: v for k, v in expected.items() if k != "purpose"})
+
+    def test_baseline_cross_language_incoming_style_survives_an_english_model_purpose(self):
+        data = payload(); data["interfaceLanguage"] = "en"
+        data["messages"] = [{"id": "original", "role": "user", "text": "Summarize returned transfers in English."},
+            {"id": "old-answer", "role": "assistant", "text": "The scope is ready."},
+            {"id": "style", "role": "user", "text": "지갑과 관찰 기간은 유지하고 입금만 한국어로 보여 주세요."}]
+        response = refined(data); response["intent"]["purpose"] = "Summarize incoming returned transfers"
+        result = run("refine", data, ScriptedModel(response))
+        self.assertEqual(result["status"], "READY_TO_PLAN")
+        self.assertEqual(infer_output_options(result["intent"]["purpose"]), OutputOptions("ko", "incoming"))
+        for key in ("wallet", "windowStart", "windowEnd", "resourceId"):
+            self.assertEqual(result["intent"][key], normalize(data)["intent"][key])
+
+    def test_previous_output_contract_survives_truncated_history_and_does_not_accumulate(self):
+        data = payload(); data["intent"]["purpose"] = with_output_options("Returned transfer count", OutputOptions("ko", "count"))
+        data["messages"] = [{"id": "style", "role": "user", "text": "Keep the selected wallet and use a concise explanation."}]
+        data["interfaceLanguage"] = "en"
+        response = refined(data); result = run("refine", data, ScriptedModel(response))
+        self.assertEqual(result["intent"]["purpose"], data["intent"]["purpose"])
+        self.assertEqual(infer_output_options(result["intent"]["purpose"]), OutputOptions("ko", "count"))
+        data["intent"] = result["intent"]; data["messages"].append({"id": "replacement", "role": "user", "text": "Now show outgoing transfers only in English."})
+        result = run("refine", data, ScriptedModel(refined(data)))
+        self.assertEqual(infer_output_options(result["intent"]["purpose"]), OutputOptions("en", "outgoing"))
+        self.assertEqual(len(result["intent"]["purpose"].splitlines()), 2)
+
+    def test_selected_language_partial_is_added_without_translating_other_model_text(self):
+        for language, expected in (("ko", PARTIAL_KO), ("en", PARTIAL)):
+            with self.subTest(language=language):
+                data = payload(); data["interfaceLanguage"] = language
+                proposal = planned(data); proposal["limitations"] = [PARTIAL, PARTIAL_KO, "Model-authored qualification remains unchanged."]
+                model = ScriptedModel(proposal, critic(data)); result = run("plan", data, model)
+                self.assertEqual(result["status"], "PROPOSED")
+                self.assertEqual(result["limitations"], [expected, "Model-authored qualification remains unchanged."])
+                for _, content, _ in model.calls:
+                    self.assertEqual(content["outputContract"], {"language": language, "focus": "summary"})
+                    self.assertEqual(content["catalog"][0]["coverage"], expected)
+
+    def test_unsupported_recovery_is_prompted_but_status_is_never_promoted_in_code(self):
+        data = payload(); data["messages"] = [{"id": "old", "role": "user", "text": "Tell me the current balance and profit."},
+            {"id": "prior-refusal", "role": "assistant", "text": "Balance is unsupported."},
+            {"id": "replacement", "role": "user", "text": "Instead, summarize only returned transfers in English."}]
+        for status in ("UNSUPPORTED", "READY_TO_PLAN"):
+            result = run("refine", data, ScriptedModel(refined(data, status=status)))
+            self.assertEqual(result["status"], status)
+        model = ScriptedModel(planned(data), critic(data, verdict="REJECT", issueCodes=["UNSUPPORTED_CLAIM"]))
+        self.assertEqual(run("plan", data, model)["code"], "WORKSPACE_PLAN_REJECTED")
+
+    def test_boundary_explanation_is_not_an_execution_command_but_actual_commands_still_stop(self):
+        data = payload(); proposal = planned(data)
+        proposal["limitations"] = ["Human approval is required; no financial execution has happened."]
+        result = run("plan", data, ScriptedModel(proposal, critic(data, reason="This describes a human approval boundary, not an authority request.")))
+        self.assertEqual(result["status"], "PROPOSED")
+        for command in ("Execute payment now.", "Sign the transaction now.", "Approve the payment automatically.", "자동 결제합니다"):
+            proposal = planned(data); proposal["steps"][0]["reason"] = command; model = ScriptedModel(proposal)
+            self.assertEqual(run("plan", data, model)["code"], "WORKSPACE_INVALID_MODEL_OUTPUT")
+            self.assertEqual(len(model.calls), 1)
+
+    def test_output_contract_cannot_truncate_overlong_purpose_or_fill_a_missing_goal(self):
+        data = payload(); value = refined(data); value["intent"]["purpose"] = "x" * 2_000
+        result = run("refine", data, ScriptedModel(value))
+        self.assertEqual(result["code"], "WORKSPACE_INVALID_MODEL_OUTPUT")
+        value = refined(data, status="CLARIFICATION_REQUIRED"); value["intent"].update(purpose=None, missingFields=["purpose"])
+        result = run("refine", data, ScriptedModel(value))
+        self.assertIsNone(result["intent"]["purpose"])
+        self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
+
     def test_null_initial_intent_returns_real_model_clarification_without_guessed_scope(self):
         data = payload(); data["intent"] = None
         intent = {"purpose": "Review observed transfers", "wallet": None, "windowStart": None,
@@ -89,7 +239,7 @@ class WorkspaceRoleTests(unittest.TestCase):
         data["intent"].update(purpose=data["messages"][-1]["text"], missingFields=[])
         result = run("refine", data, ScriptedModel(refined(data)))
         self.assertEqual(result["status"], "READY_TO_PLAN")
-        self.assertEqual(result["intent"]["purpose"], data["messages"][-1]["text"])
+        self.assertEqual(result["intent"]["purpose"], with_output_options(data["messages"][-1]["text"], OutputOptions("ko")))
         self.assertEqual(result["intent"]["wallet"], WALLET)
 
     def test_planner_and_critic_are_separate_bounded_roles(self):
@@ -100,7 +250,7 @@ class WorkspaceRoleTests(unittest.TestCase):
         self.assertEqual(result["executionKind"], "live_model_planner_critic")
         self.assertIn(PARTIAL, result["limitations"])
         self.assertEqual(result["modelVersion"], MODEL)
-        self.assertEqual(result["promptVersion"], "workspace/v1")
+        self.assertEqual(result["promptVersion"], "workspace/v2")
         self.assertNotIn("contextDigest", result)
         sent = json.dumps([call[1] for call in model.calls])
         for excluded in ("must-not-send", "amountAtomic", "recipient"):

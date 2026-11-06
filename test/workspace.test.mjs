@@ -52,7 +52,7 @@ async function setup({ sessionTtlMs = 8 * 3600_000, ownerModelDailyLimit = 100, 
       intent.missingFields = ['purpose', 'wallet', 'windowStart', 'windowEnd', 'resourceId'].filter(field => intent[field] === null);
       return { status: intent.missingFields.length ? 'CLARIFICATION_REQUIRED' : 'READY_TO_PLAN',
         assistantText: 'MODEL_PRIVATE_MARKER: scope reviewed.', intent, executionKind: 'live_model_intent_refinement',
-        modelVersion: MODEL, promptVersion: 'workspace/v1' };
+        modelVersion: MODEL, promptVersion: 'workspace/v2' };
     },
     async plan(input, options) {
       plans++; inputs.push(structuredClone(input)); await control.planHook?.(input, options);
@@ -60,7 +60,7 @@ async function setup({ sessionTtlMs = 8 * 3600_000, ownerModelDailyLimit = 100, 
       return { status: 'PROPOSED', summary: 'Inspect bounded observed transfer activity.',
         steps: [{ role: 'planner', capability: RESOURCE, resourceId: RESOURCE, reason: 'Fits the explicitly selected observation scope.' }],
         limitations: ['Only observed transfers are covered.'], executionKind: 'live_model_planner_critic',
-        modelVersion: MODEL, promptVersion: 'workspace/v1' };
+        modelVersion: MODEL, promptVersion: 'workspace/v2' };
     },
   };
   server.on('request', createApp({ config, store, gateway, ai: { propose: financial, consume: financial },
@@ -218,6 +218,42 @@ test('message request identity replays pending and completed work without extra 
     assert.equal(replay.status, 200); assert.equal(f.counts().refines, 1); assert.equal(replay.body.messages.length, 2);
     assert.equal(f.counts().financialCalls, 0);
   } finally { release.resolve(); await f.close(); }
+});
+
+for (const interfaceLanguage of ['ko', 'en']) test(`interface ${interfaceLanguage} is an owner-bound planning fallback and an immutable retry input`, async () => {
+  const f = await setup();
+  try {
+    const a = await f.login(), record = await f.conversation(a.cookie);
+    const body = { scope: scope(a.pair.address), interfaceLanguage };
+    const first = await f.message(a.cookie, record, body);
+    assert.equal(first.status, 200); assert.equal(f.inputs.at(-1).interfaceLanguage, interfaceLanguage);
+    assert.equal((await f.repo.get(a.pair.address, 'conversation', record.id)).data.interfaceLanguage, interfaceLanguage);
+    const replay = await f.message(a.cookie, record, body);
+    assert.equal(replay.status, 200); assert.equal(f.counts().refines, 1);
+    const changed = await f.message(a.cookie, record, { ...body, interfaceLanguage: interfaceLanguage === 'ko' ? 'en' : 'ko' });
+    assert.equal(changed.status, 409); assert.equal(changed.body.error.code, 'IDEMPOTENCY_CONFLICT');
+    assert.equal(f.counts().refines, 1);
+    const plan = await f.plan(a.cookie, first.body);
+    assert.equal(plan.status, 200); assert.equal(f.inputs.at(-1).interfaceLanguage, interfaceLanguage);
+    assert.equal(f.counts().financialCalls, 0);
+  } finally { await f.close(); }
+});
+
+test('invalid interface language is rejected before turn persistence, quota or inference; omitted legacy input stays valid', async () => {
+  const f = await setup();
+  try {
+    const a = await f.login(), record = await f.conversation(a.cookie);
+    for (const [index, interfaceLanguage] of [null, 'KO', 'fr', '', {}, ['ko'], 1].entries()) {
+      const denied = await f.message(a.cookie, record, { id: 'invalid-language-' + index, interfaceLanguage });
+      assert.equal(denied.status, 400); assert.equal(denied.body.error.code, 'INVALID_INTERFACE_LANGUAGE');
+    }
+    assert.equal(f.counts().refines, 0);
+    assert.equal((await f.repo.get(a.pair.address, 'conversation', record.id)).revision, record.revision);
+    assert.equal(f.rawStore.db.prepare('SELECT count(*) AS n FROM workspace_model_usage').get().n, 0);
+    const legacy = await f.message(a.cookie, record, { scope: scope(a.pair.address) });
+    assert.equal(legacy.status, 200); assert.equal(f.inputs.at(-1).interfaceLanguage, undefined);
+    assert.equal(f.counts().financialCalls, 0);
+  } finally { await f.close(); }
 });
 
 test('deleted or expired memory during inference blocks stale assistant persistence', async () => {

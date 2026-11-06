@@ -463,3 +463,27 @@ Render is still a separately authorized deployment step. The blueprint targets
 repository-app installation permission and final public origin are not implied
 by a successful local build. External funded Devnet settlement/delivery and
 Phantom user acceptance remain separate from the tests listed above.
+# Actual-model baseline and output contract — November7
+
+The first pre-sample-frozen live12-case/32-stage set ran40 actual Responses calls
+against main `34a28b1` / `workspace/v1`. All returned, without retry, port failure
+or omitted stages. Automated checks passed7/12 cases and22/32 stages; the sample
+failed product acceptance. Independent agent review inspected32 stages/40 role
+returns and retained `humanReviewed=false`. Exact scope matched all22 refinement
+stages, but count/direction/language presentation, Korean supported recovery and
+a critic authority false positive still failed. Fixed English coverage copy and
+model-generated English prose were attributed separately.
+
+The controller preserved the original sample before source changes. The new
+version2 corpus keeps the same cases, rubric and expected labels and explicitly
+labels this a `post-baseline-regression`. [AI_QUALITY.md](AI_QUALITY.md) records
+the source/suite binding, usage calculation, safe live-run boundary and the
+remaining semantic acceptance work.
+
+The output-contract implementation passed local Node618/618 with zero skips and
+required owned PostgreSQL, plus Python242/242. These include actual signed
+HTTP/file-SQLite owner checks for valid/invalid/omitted interface language and
+exact retry identity; UI retry across a language change; actual Node-to-Python
+subprocess-to-loopback Responses propagation; and actual Python stdin/stdout
+tests for priority and negation without external credentials. They prove local
+integration, not actual-provider language/refusal improvement or payment.

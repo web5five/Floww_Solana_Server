@@ -51,6 +51,16 @@ delivery. The acceptance ledger keeps those gates explicit.
 
 ## This improvement iteration
 
+The November7 actual-model baseline at `34a28b1` exposed a difference from the
+earlier fixed-scenario experience: a natural-language conversation can describe
+the right count or language while losing it before report formatting, and a
+critic can block a valid plan for its safety explanation. The12 authored cases
+completed32 stages/40 model calls, with7/12 cases passing automated criteria.
+They did not evaluate the earlier model or establish cross-chain performance.
+[AI_QUALITY.md](AI_QUALITY.md) records these retained failures and the version2
+output-contract follow-up. Exact scope remained bound; presentation, supported
+recovery and semantic quality still need separate evidence.
+
 - Invalidate an explicitly changed wallet/window when its replacement cannot be
   resolved; never silently proceed with the earlier scope.
 - Bound public merchant work and duplicate-proof amplification before expensive

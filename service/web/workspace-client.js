@@ -678,7 +678,7 @@
       state.stage = 'refining'; renderJourney();
       const c = state.conversation, fingerprint = messageFingerprint(text, rawScope(), c.id);
       if (state.pendingMessage?.fingerprint !== fingerprint) state.pendingMessage = { fingerprint, body: {
-        text, scope, clientRequestId: crypto.randomUUID(), expectedRevision: c.revision } };
+        text, scope, interfaceLanguage: locale.language, clientRequestId: crypto.randomUUID(), expectedRevision: c.revision } };
       const pending = state.pendingMessage, body = pending.body;
       try { state.conversation = await api('/api/conversations/' + c.id + '/messages', 'POST', body); state.pendingMessage = null; }
       catch (error) { if (error.status && state.pendingMessage === pending) state.pendingMessage = null; throw error; }

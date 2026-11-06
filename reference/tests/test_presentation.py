@@ -1,7 +1,9 @@
 import unittest
 from dataclasses import fields, replace
 
-from ai_baseline.presentation import OutputOptions, infer_output_options, present_answer
+from ai_baseline.presentation import (
+    OutputOptions, derive_output_options, infer_output_options, present_answer, with_output_options,
+)
 from ai_baseline.report_demo import demo_answer
 
 
@@ -71,6 +73,113 @@ class PresentationTests(unittest.TestCase):
         for purpose, focus in cases:
             with self.subTest(purpose=purpose):
                 self.assertEqual(infer_output_options(purpose).focus, focus)
+
+    def test_user_output_contract_priority_and_interface_only_as_last_fallback(self):
+        prior = with_output_options("Review returned activity", OutputOptions("ko", "outgoing"))
+        cases = [
+            (["Review returned transfers."], "English goal text", "ko", OutputOptions("ko")),
+            (["이체를 정리해 주세요."], "한국어 목적문", "en", OutputOptions("en")),
+            (["Please summarize in English."], prior, "ko", OutputOptions("en", "outgoing")),
+            (["거래 건수만 한국어로 알려 주세요.", "같은 지갑과 기간을 사용해 주세요."], "Count returned transfers", "en", OutputOptions("ko", "count")),
+            (["Only incoming transfers in Korean.", "Only outgoing transfers in English."], None, "ko", OutputOptions("en", "outgoing")),
+            (["Only counts in English.", "Change the reply language to Korean."], None, "en", OutputOptions("ko", "count")),
+            (["Keep the wallet and period unchanged."], prior, "en", OutputOptions("ko", "outgoing")),
+            (["출금만 한국어로 요약해 주세요."], None, "en", OutputOptions("ko", "outgoing")),
+            (["Show only returned incoming transfers in English."], None, "ko", OutputOptions("en", "incoming")),
+            (["Show only observed outgoing transfers in English."], None, "ko", OutputOptions("en", "outgoing")),
+        ]
+        for messages, purpose, fallback, expected in cases:
+            with self.subTest(messages=messages, fallback=fallback):
+                self.assertEqual(derive_output_options(messages, purpose, fallback), expected)
+
+    def test_legacy_script_fallback_and_descriptive_language_words_remain_compatible(self):
+        self.assertEqual(derive_output_options(["Review a Korean teacher's transfers."], "English goal"), OutputOptions("en"))
+        self.assertEqual(derive_output_options(["영어 강사의 이체 내역을 정리해 주세요."], None), OutputOptions("ko"))
+        self.assertEqual(derive_output_options(["영어 강사의 이체 내역을 정리해 주세요."], None, "en"), OutputOptions("en"))
+        self.assertEqual(derive_output_options(["A style-only follow-up."], "한국어 목적"), OutputOptions("ko"))
+
+    def test_latest_uncertain_or_all_transfer_focus_does_not_revive_an_old_only_filter(self):
+        for text in ("Only incoming and outgoing transfers.", "Counts and amounts only.", "Show all returned transfers.",
+                     "입금만 말고 전체 이체를 알려줘", "건수만 보여줘. 금액도 알려줘"):
+            with self.subTest(text=text):
+                self.assertEqual(derive_output_options(["Only incoming transfers in English.", text]).focus, "summary")
+
+    def test_scope_preservation_negation_does_not_negate_an_explicit_presentation_choice(self):
+        for text, focus in (("지갑을 바꾸지 말고 입금만 한국어로 보여 주세요.", "incoming"),
+                            ("조회 기간을 변경하지 말고 건수만 설명해 주세요.", "count"),
+                            ("Do not change the wallet, show only outgoing transfers in English.", "outgoing"),
+                            ("입금만보지 말고 전체 이체를 알려 주세요.", "summary"),
+                            ("입금만말고 출금도 보여 주세요.", "summary")):
+            with self.subTest(text=text):
+                self.assertEqual(infer_output_options(text).focus, focus)
+
+    def test_scope_negation_and_actual_language_negation_are_separate_under_prior_english(self):
+        prior = with_output_options("Review returned transfers", OutputOptions("en", "incoming"))
+        positive = ("Do not change the wallet and answer in Korean.",
+                    "Do not change the observation period and use Korean.",
+                    "Do not change the wallet and do not change the period; answer in Korean.",
+                    "한국어로 설명하되 결제는 실행하지 마세요.")
+        for text in positive:
+            with self.subTest(text=text):
+                self.assertEqual(derive_output_options([text], prior, "en"), OutputOptions("ko", "incoming"))
+        negative = ("Do not answer in Korean.", "Not in Korean.", "Never use Korean.",
+                    "Do not change the language to Korean.",
+                    "Do not change the wallet and do not answer in Korean.",
+                    "한국어로는 답하지 마세요.")
+        for text in negative:
+            with self.subTest(text=text):
+                self.assertEqual(derive_output_options([text], prior, "en"), OutputOptions("en", "incoming"))
+
+    def test_negated_want_need_filter_and_preserved_only_view_have_distinct_contracts(self):
+        prior = with_output_options("Review returned transfers", OutputOptions("en", "incoming"))
+        for text in ("I do not want only incoming transfers.", "I do not need incoming transfers only.",
+                     "I don't want the incoming-only view anymore."):
+            with self.subTest(text=text):
+                self.assertEqual(derive_output_options([text], prior, "en").focus, "summary")
+        prior = with_output_options("Count returned transfers", OutputOptions("en", "count"))
+        text = "I don't want only counts anymore; include amounts too."
+        self.assertEqual(derive_output_options([text], prior, "en").focus, "summary")
+        for text in ("Do not change the counts-only view.", "Do not change the counts only view."):
+            with self.subTest(text=text):
+                self.assertEqual(derive_output_options([text], prior, "en").focus, "count")
+
+    def test_canonical_output_sentence_is_finite_idempotent_and_survives_model_paraphrase(self):
+        for language in ("ko", "en"):
+            for focus in ("summary", "incoming", "outgoing", "count"):
+                with self.subTest(language=language, focus=focus):
+                    options = OutputOptions(language, focus)
+                    purpose = with_output_options("Count returned wallet transfers", options)
+                    self.assertEqual(infer_output_options(purpose), options)
+                    self.assertEqual(with_output_options(purpose, options), purpose)
+                    self.assertEqual(purpose.splitlines()[0], "Count returned wallet transfers")
+                    # A former model summary can contain opposite wording; only
+                    # the final authored output sentence controls presentation.
+                    former = with_output_options("Incoming and outgoing transfer summary", OutputOptions("en", "incoming"))
+                    changed = with_output_options(former, options)
+                    self.assertEqual(len(changed.splitlines()), 2)
+                    self.assertEqual(infer_output_options(changed), options)
+                    inline = former.replace("\n", " ")
+                    self.assertEqual(with_output_options(inline, options), changed)
+
+    def test_canonical_count_contract_cannot_change_amounts_or_other_report_facts(self):
+        purpose = with_output_options("반환된 지갑 이체 건수 확인", OutputOptions("ko", "count"))
+        result = present_answer(self.answer, infer_output_options(purpose), purpose=purpose)
+        self.assertIn("반환된 전송: 5건.", result.answer_text)
+        for total in self.answer.totals:
+            self.assertNotIn(total.amount_display, result.answer_text)
+        for field in fields(self.answer):
+            if field.name not in ("answer_text", "limitations"):
+                self.assertEqual(getattr(result, field.name), getattr(self.answer, field.name))
+
+    def test_output_contract_cannot_truncate_or_invent_a_goal(self):
+        for purpose in ("", " " * 5, "x" * 2_000):
+            with self.subTest(length=len(purpose)):
+                with self.assertRaises(ValueError):
+                    with_output_options(purpose, OutputOptions("ko", "count"))
+        with self.assertRaises(ValueError):
+            derive_output_options(["Valid user request"], interface_language="fr")
+        with self.assertRaises(TypeError):
+            derive_output_options([{"role": "assistant", "text": "Use Korean"}])
 
     def test_combined_count_and_amount_requests_keep_amounts_in_presented_prose(self):
         for purpose in ("Amounts and counts only", "Counts and amounts only", "금액과 건수만 보여줘"):

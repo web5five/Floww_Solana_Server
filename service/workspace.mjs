@@ -139,7 +139,7 @@ export function mountWorkspace(app, { repo, planner, mandates }, context) {
   function validateModelOutput(result, operation) {
     const metadata = ['executionKind', 'modelVersion', 'promptVersion'];
     exact(result, operation === 'refine' ? ['status', 'assistantText', 'intent', ...metadata] : ['status', 'summary', 'steps', 'limitations', ...metadata]);
-    if (result.modelVersion !== config.model || result.promptVersion !== 'workspace/v1' ||
+    if (result.modelVersion !== config.model || result.promptVersion !== 'workspace/v2' ||
         result.executionKind !== (operation === 'refine' ? 'live_model_intent_refinement' : 'live_model_planner_critic')) fail('INVALID_PLANNER_OUTPUT', 502);
     if (operation === 'refine') {
       if (!['READY_TO_PLAN', 'CLARIFICATION_REQUIRED', 'UNSUPPORTED'].includes(result.status)) fail('INVALID_PLANNER_OUTPUT', 502);
@@ -213,14 +213,18 @@ export function mountWorkspace(app, { repo, planner, mandates }, context) {
     await send(req, res, owner, view(record, { before: req.query.before }));
   });
   app.post('/api/conversations/:id/messages', async (req, res) => {
-    const owner = await ownerOf(req); exact(req.body, ['clientRequestId', 'expectedRevision', 'text', 'scope']);
+    const owner = await ownerOf(req); exact(req.body, ['clientRequestId', 'expectedRevision', 'text', 'scope', 'interfaceLanguage']);
     const text = cleanText(req.body.text), explicitScope = scope(req.body.scope);
+    const interfaceLanguage = req.body.interfaceLanguage;
+    if (interfaceLanguage !== undefined && !['ko', 'en'].includes(interfaceLanguage)) fail('INVALID_INTERFACE_LANGUAGE');
     requestId(req.body.clientRequestId); readyModel();
     await run(req, owner, async () => {
-      const hash = digest(canonical({ kind: 'message', text, explicitScope }));
+      const hash = digest(canonical({ kind: 'message', text, explicitScope,
+        ...(interfaceLanguage === undefined ? {} : { interfaceLanguage }) }));
       const claimed = await begin(owner, req.params.id, req.body, 'message', hash, d => {
         d.messages.push({ id: randomUUID(), role: 'user', text, at: new Date(now()).toISOString() });
         d.intent = { ...d.intent, ...explicitScope }; d.plan = null; d.status = 'REFINING';
+        if (interfaceLanguage !== undefined) d.interfaceLanguage = interfaceLanguage;
         // The user's first request is a draft purpose, never inferred wallet,
         // time, authority or a successful model interpretation.
         if (d.messages.length === 1 && d.intent.purpose === null) d.intent.purpose = text;
@@ -233,7 +237,8 @@ export function mountWorkspace(app, { repo, planner, mandates }, context) {
         const preferences = await memories(record, owner);
         await repo.reserveModel(owner, 1, modelLimits); await assertSession(req, owner);
         const result = await callPlanner(req, res, 'refine', { messages: modelInput(record), intent: record.data.intent,
-          memories: preferences.map(m => ({ key: m.data.key, value: m.data.value })), catalog: mandates.catalog(), nowIso: new Date(now()).toISOString() });
+          memories: preferences.map(m => ({ key: m.data.key, value: m.data.value })), catalog: mandates.catalog(), nowIso: new Date(now()).toISOString(),
+          ...(record.data.interfaceLanguage === undefined ? {} : { interfaceLanguage: record.data.interfaceLanguage }) });
         await assertSession(req, owner); await memoryStillCurrent(owner, preferences); plannerFailure(result);
         validateModel(result, 'refine');
         for (const [key, value] of Object.entries(explicitScope)) if (result.intent[key] !== value) fail('MODEL_SCOPE_CHANGED', 422);
@@ -260,7 +265,8 @@ export function mountWorkspace(app, { repo, planner, mandates }, context) {
         const preferences = await memories(record, owner);
         await repo.reserveModel(owner, 2, modelLimits); await assertSession(req, owner);
         const result = await callPlanner(req, res, 'plan', { messages: modelInput(record), intent: record.data.intent,
-          memories: preferences.map(m => ({ key: m.data.key, value: m.data.value })), catalog: mandates.catalog(), nowIso: new Date(now()).toISOString() });
+          memories: preferences.map(m => ({ key: m.data.key, value: m.data.value })), catalog: mandates.catalog(), nowIso: new Date(now()).toISOString(),
+          ...(record.data.interfaceLanguage === undefined ? {} : { interfaceLanguage: record.data.interfaceLanguage }) });
         await assertSession(req, owner); await memoryStillCurrent(owner, preferences); plannerFailure(result);
         validateModel(result, 'plan');
         const plan = { ...result, id: randomUUID(), intentRevision: record.data.intentRevision,

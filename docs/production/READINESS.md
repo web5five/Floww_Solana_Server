@@ -51,7 +51,7 @@ of security certification, accessibility conformance or a contractual SLA.
 ## Current iteration evidence
 
 The table's starting checkpoint is historical, not a list of features still
-absent. Released comparison checkpoint `d7995f6` includes the reviewed PR11–17 changes:
+absent. Released comparison checkpoint `34a28b1` includes the reviewed PR11–18 changes:
 
 - P03–P06: dedicated DB/ledger readiness, bounded HTTP shutdown, merchant replay
   admission and redacted fixed-label diagnostics have implementation and
@@ -61,12 +61,21 @@ absent. Released comparison checkpoint `d7995f6` includes the reviewed PR11–17
   are verified within the boundaries below. The full voice implementation has
   controlled engineering acceptance; actual microphone/provider/audibility,
   full keyboard/zoom coverage, actual-model quality and funded completion remain open.
-- P10: [PR17's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42279768923)
+- P10: [PR18's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42287137650)
   passed both required PostgreSQL/runtime/Python checks and an actual non-root,
   network-isolated image check. It did not deploy a public service.
 
 The detailed acceptance record is [VERIFICATION.md](VERIFICATION.md). Those
 implemented controls do not close public origin, wallet or payment acceptance.
+
+P08 now has a first actual-model baseline: all12 authored cases/32 stages and40
+role calls completed, with7/12 cases and22/32 stages passing the automated
+criteria. Independent agent review found material output-preference, language,
+supported-recovery and critic false-positive problems. This is failed acceptance,
+not a general accuracy estimate. [AI_QUALITY.md](AI_QUALITY.md) binds the retained
+baseline and defines the version2 output contract, local checks and still-pending
+live regression. The same cases are explicitly a post-baseline regression set;
+scripted success or a deterministic suffix does not close actual model quality.
 
 The preceding PR11 passed full local Node289/Python206 checks. Its readiness/drain,
 merchant replay admission, redacted diagnostics and scope-correction fixes have
