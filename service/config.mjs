@@ -65,6 +65,17 @@ export function loadConfig(env = process.env) {
   const amountAtomic = env.PAYMENT_AMOUNT_ATOMIC || '1000';
   const maxPaymentAtomic = env.FLOWW_MAX_PAYMENT_ATOMIC || '1000000';
   if (atomic(amountAtomic) <= 0n || atomic(amountAtomic) > atomic(maxPaymentAtomic)) fail('INVALID_CONFIGURATION', 500);
+  const dailyPaymentAtomic = env.FLOWW_DAILY_PAYMENT_ATOMIC || maxPaymentAtomic;
+  if (atomic(dailyPaymentAtomic) <= 0n || atomic(dailyPaymentAtomic) > atomic(maxPaymentAtomic)) fail('INVALID_CONFIGURATION', 500);
+  const count = (value, fallback, max) => {
+    const result = value === undefined ? fallback : Number(value);
+    if (!Number.isSafeInteger(result) || result < 1 || result > max) fail('INVALID_CONFIGURATION', 500);
+    return result;
+  };
+  const maxConcurrentOperations = count(env.FLOWW_MAX_OPERATIONS, 4, 32);
+  const maxOwnerConcurrentOperations = count(env.FLOWW_MAX_OWNER_OPERATIONS, Math.min(2, maxConcurrentOperations), maxConcurrentOperations);
+  const globalModelDailyLimit = count(env.FLOWW_MODEL_DAILY_CALLS, 60, 1000);
+  const ownerModelDailyLimit = count(env.FLOWW_MODEL_OWNER_DAILY_CALLS, Math.min(20, globalModelDailyLimit), globalModelDailyLimit);
   const port = Number(env.PORT || originUrl.port || (originUrl.protocol === 'https:' ? 443 : 80));
   if (!Number.isInteger(port) || port < 1 || port > 65535) fail('INVALID_CONFIGURATION', 500);
   const paymentEnabled = env.FLOWW_ENABLE_DEVNET_PAYMENTS === 'true';
@@ -78,7 +89,8 @@ export function loadConfig(env = process.env) {
     rpcUrl: endpoint(env.SOLANA_RPC_URL || 'https://api.devnet.solana.com'),
     facilitatorUrl: endpoint(env.X402_FACILITATOR_URL || 'https://x402.org/facilitator'),
     merchantOrigin: origin, merchantBaseUrl: origin + '/merchant/reports',
-    merchantPayTo, asset, assetDecimals: 6, amountAtomic, maxPaymentAtomic,
+    merchantPayTo, asset, assetDecimals: 6, amountAtomic, maxPaymentAtomic, dailyPaymentAtomic,
+    maxConcurrentOperations, maxOwnerConcurrentOperations, globalModelDailyLimit, ownerModelDailyLimit,
     paymentEnabled, payerKeyFile: env.FLOWW_PAYER_KEY_FILE || null,
     requestTimeoutMs: 12000, quoteTtlMs: 5 * 60_000, sessionTtlMs: 8 * 3600_000,
     model: env.FLOWW_MODEL || null, apiKey: env.OPENAI_API_KEY || null,

@@ -7,16 +7,18 @@
   <meta name="description" content="목적에 맞는 자료를 요청하고, 승인한 조건과 결제·결과를 확인하는 Floww 워크스페이스">
   <title>Floww · 자료 실행 워크스페이스</title>
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/workspace-shell.css">
   <script src="/app.js" defer></script>
+  <script src="/workspace-client.js" defer></script>
 </head>
 <body>
-  <a class="skip-link" href="#workspace">워크스페이스로 건너뛰기</a>
+  <a class="skip-link" href="#workspace-top">워크스페이스로 건너뛰기</a>
   <header class="site-header">
     <a class="brand" href="/" aria-label="Floww 홈">
       <svg class="brand-symbol" viewBox="0 0 36 36" aria-hidden="true"><rect width="36" height="36" rx="11" fill="currentColor"/><path d="M10 12h16M10 18h12M10 24h7" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>
       <span>Floww<span class="brand-dot">.</span></span>
     </a>
-    <span class="header-context">자료 실행 워크스페이스</span>
+    <span class="header-context">Intelligence workspace</span>
     <div class="header-actions">
       <span class="network-pill"><span class="network-dot"></span>Solana Devnet</span>
       <button id="connect-wallet" type="button" class="button button-dark">지갑 연결</button>
@@ -24,22 +26,42 @@
     </div>
   </header>
 
-  <main id="workspace" class="workspace" tabindex="-1">
-    <section class="intro" aria-labelledby="page-title">
-      <div>
-        <p class="eyebrow">INTENT → APPROVAL → RESULT</p>
-        <h1 id="page-title">원하는 자료를 요청하고,<br>실행의 흐름을 확인하세요.</h1>
-        <p class="intro-copy">지갑 이체 분석을 시작하세요. 결제 조건을 직접 확인하고 승인한 뒤,<br class="desktop-break"> 결제와 자료 전달, 분석 결과를 각각 살펴볼 수 있습니다.</p>
-      </div>
-      <div class="intro-status" aria-live="polite">
-        <span class="status-icon" aria-hidden="true">↗</span>
-        <div><span class="tiny-label">실행 환경</span><strong id="health-status">설정 상태 확인 중</strong><p id="health-detail">현재 Devnet 환경을 확인하고 있습니다.</p></div>
-      </div>
-    </section>
+  <div class="app-layout">
+    <aside class="shell-sidebar" aria-label="워크스페이스 메뉴">
+      <p class="nav-label">WORKSPACE</p>
+      <nav class="shell-nav">
+        <button type="button" data-view="overview" aria-current="page"><span aria-hidden="true">◈</span> 개요</button>
+        <button type="button" data-view="assistant"><span aria-hidden="true">✳</span> AI 어시스턴트</button>
+        <button type="button" data-view="tasks"><span aria-hidden="true">▤</span> 작업 및 결과</button>
+        <button type="button" data-view="memory"><span aria-hidden="true">⌘</span> 나의 기억</button>
+        <button type="button" data-view="budgets"><span aria-hidden="true">◉</span> 예산 및 권한</button>
+        <button type="button" data-view="activity"><span aria-hidden="true">↗</span> 활동 기록</button>
+      </nav>
+      <div class="sidebar-bottom"><span class="tiny-label">실행 환경</span><strong id="health-status">설정 상태 확인 중</strong><p id="health-detail">현재 연결을 확인하고 있습니다.</p><span class="sidebar-network"><i></i> SOLANA DEVNET</span></div>
+    </aside>
+    <main id="workspace-top" class="shell-main" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow" id="view-eyebrow">YOUR WORKSPACE</p><h1 id="view-title">좋은 결정은, 분명한 목적에서.</h1><p id="view-description">목적과 근거, 실행의 흐름을 한곳에서 관리하세요.</p></div><button class="button button-dark" id="quick-new" type="button">새 대화 <span aria-hidden="true">＋</span></button></div>
+      <div id="notice" class="notice" role="alert" hidden><span id="notice-text"></span><button id="dismiss-notice" type="button" aria-label="알림 닫기">×</button></div>
+      <p id="live-status" class="sr-only" aria-live="polite"></p>
+      <p id="shell-status" class="shell-status" role="status"></p>
 
-    <div id="notice" class="notice" role="alert" hidden><span id="notice-text"></span><button id="dismiss-notice" type="button" aria-label="알림 닫기">×</button></div>
-    <p id="live-status" class="sr-only" aria-live="polite"></p>
+      <section data-page="overview" aria-label="워크스페이스 개요">
+        <div class="overview-banner"><div><p class="eyebrow">FROM INTENT TO EVIDENCE</p><h2>질문을 다듬고,<br>근거를 따라 실행하세요.</h2><p>AI가 필요한 자료와 조회 범위를 제안합니다.<br>실행 전 조건을 확인하고, 결과와 기록을 이어 보세요.</p><button class="button button-dark" type="button" data-go="assistant">어시스턴트와 시작하기 <span aria-hidden="true">↗</span></button></div><div class="flow-illustration" aria-label="목적, 검토, 승인, 근거의 흐름"><span>01 <b>목적</b></span><i>↘</i><span>02 <b>검토</b></span><i>↘</i><span>03 <b>승인</b></span><i>↘</i><span>04 <b>근거</b></span></div></div>
+        <div id="dashboard-metrics" class="metric-grid" aria-label="내 작업 현황"></div>
+        <div class="overview-grid"><section class="panel"><div class="section-heading"><h2>바로 이어가기</h2><button class="text-button" type="button" data-go="tasks">모든 작업 ↗</button></div><div id="dashboard-tasks" class="compact-list"></div></section><section class="panel"><div class="section-heading"><h2>최근 활동</h2><button class="text-button" type="button" data-go="activity">전체 기록 ↗</button></div><div id="dashboard-activity" class="compact-list"></div></section></div>
+        <section class="panel resource-panel"><div class="section-heading"><h2>연결된 자료</h2><span class="small-tag">RESOURCE CATALOG</span></div><div id="resource-catalog"></div></section>
+      </section>
 
+      <section data-page="assistant" hidden aria-label="AI 어시스턴트">
+        <div class="assistant-layout"><aside class="panel conversation-sidebar"><div class="section-heading"><h2>내 대화</h2><button id="new-conversation" class="text-button" type="button" aria-label="새 대화 만들기">＋ 새로 만들기</button></div><label class="check-label memory-choice"><input id="conversation-memory" type="checkbox"><span>새 대화에서 저장한 기억 참고</span></label><div id="conversation-list" class="conversation-list"></div><button id="more-conversations" type="button" class="text-button list-more" hidden>이전 대화 더 보기</button></aside>
+          <section class="panel dialogue-panel"><div class="dialogue-header"><div><span class="tiny-label">PURPOSE → PLAN</span><h2 id="conversation-title">무엇을 알아보고 싶으세요?</h2></div><span id="conversation-state" class="state-pill">대화 시작</span></div><div id="dialogue-empty" class="dialogue-empty"><span aria-hidden="true">✳</span><h3>목적부터 함께 정리해요.</h3><p>분석할 지갑과 기간, 알고 싶은 내용을 알려 주세요.<br>계획을 검토한 뒤 작업으로 연결할 수 있습니다.</p><button class="suggestion" id="suggest-wallet" type="button">최근 지갑 이체를 자산별로 정리하고 싶어요 ↗</button></div><button id="earlier-messages" class="text-button" type="button" hidden>이전 메시지 보기</button><div id="dialogue-messages" class="dialogue-messages" role="log" aria-live="polite" aria-label="AI와의 대화"></div>
+            <form id="message-form" class="message-composer"><label class="sr-only" for="message-text">요청 내용</label><textarea id="message-text" rows="3" maxlength="2000" placeholder="알고 싶은 내용이나 수정할 조건을 입력해 주세요." required></textarea><div class="composer-footer"><span id="composer-hint">지갑 로그인 후 대화를 시작할 수 있습니다.</span><button id="send-message" class="button button-dark" type="submit">보내기 ↑</button></div></form>
+          </section>
+          <aside class="assistant-inspector"><section class="panel"><div class="section-heading"><span class="step-number">01</span><h2>조회 범위</h2></div><p class="section-copy">주소와 시간을 직접 지정하면 다음 메시지에 함께 반영합니다.</p><label for="intent-wallet">Solana 지갑</label><input id="intent-wallet" maxlength="44" spellcheck="false" autocomplete="off" placeholder="분석할 지갑 주소"><label for="intent-start">시작 · 현지 시간</label><input id="intent-start" type="datetime-local" step="1"><label for="intent-end">종료 · 현지 시간</label><input id="intent-end" type="datetime-local" step="1"><div id="intent-summary" class="scope-summary"></div></section><section class="panel plan-panel"><div class="section-heading"><span class="step-number">02</span><h2>실행 계획</h2></div><div id="plan-content"><p class="section-copy">목적과 범위가 정해지면 AI가 자료를 선택하고 별도로 검토합니다.</p></div><button id="build-plan" class="button button-quiet button-wide" type="button" disabled>계획 작성 및 검토</button><form id="confirm-plan-form" hidden><label for="plan-mandate">적용할 예산 권한</label><select id="plan-mandate"><option value="">이번 작업의 조건을 별도 승인</option></select><label class="check-label"><input id="plan-ack" type="checkbox" required><span>계획에 표시된 지갑과 기간으로 작업을 만듭니다.</span></label><button class="button button-dark button-wide" type="submit" id="confirm-plan">범위 확인하고 작업 만들기 ↗</button><p class="input-note">결제 조건은 작업 화면에서 다시 확인하고 승인합니다.</p></form></section></aside>
+        </div>
+      </section>
+
+      <section data-page="tasks" id="workspace" class="workspace" hidden aria-label="작업 및 결과">
     <div class="workspace-grid">
       <aside class="request-column" aria-label="자료 요청과 내 기록">
         <section class="panel request-panel" aria-labelledby="request-title">
@@ -61,7 +83,9 @@
         <section class="panel history-panel" aria-labelledby="history-title">
           <div class="section-heading history-heading"><h2 id="history-title">내 요청</h2><span id="task-count" class="count">0</span><button id="refresh-tasks" class="text-button" type="button" disabled>새로고침</button></div>
           <div id="history-empty" class="history-empty"><span aria-hidden="true">＋</span><p>첫 번째 자료 요청을<br>만들어 보세요.</p></div>
+          <label class="archive-filter"><input id="include-archived" type="checkbox"> 보관한 요청 포함</label>
           <div id="task-list" class="task-list" aria-label="내 분석 요청 목록"></div>
+          <button id="more-tasks" class="text-button list-more" type="button" hidden>이전 요청 더 보기</button>
         </section>
       </aside>
 
@@ -89,7 +113,7 @@
               <button id="approve-task" class="button button-dark" type="submit">이 조건으로 승인</button>
             </form>
             <p id="approval-status" class="approval-status" hidden></p>
-            <div class="task-actions"><button id="quote-task" class="button button-dark" type="button">결제 조건 확인</button><button id="execute-task" class="button button-accent" type="button" hidden>승인한 결제 실행 <span aria-hidden="true">↗</span></button><button id="reconcile-task" class="button button-dark" type="button" hidden>원래 결제 상태 확인</button><button id="recover-task" class="button button-dark" type="button" hidden>같은 결제로 자료 다시 받기</button><button id="revoke-task" class="button button-quiet" type="button" hidden>승인 취소</button><button id="refresh-task" class="button button-quiet" type="button">상태 새로고침</button></div>
+            <div class="task-actions"><button id="quote-task" class="button button-dark" type="button">결제 조건 확인</button><button id="execute-task" class="button button-accent" type="button" hidden>승인한 결제 실행 <span aria-hidden="true">↗</span></button><button id="reconcile-task" class="button button-dark" type="button" hidden>원래 결제 상태 확인</button><button id="recover-task" class="button button-dark" type="button" hidden>같은 결제로 자료 다시 받기</button><button id="revoke-task" class="button button-quiet" type="button" hidden>승인 취소</button><button id="refresh-task" class="button button-quiet" type="button">상태 새로고침</button><button id="archive-task" class="button button-quiet" type="button">보관하기</button><button id="restore-task" class="button button-quiet" type="button" hidden>보관함에서 꺼내기</button></div>
             <p id="action-status" class="action-status" aria-live="polite"></p>
           </section>
 
@@ -100,7 +124,12 @@
         </div>
       </section>
     </div>
-    <footer class="site-footer"><span>FLOWW · PURPOSE BEFORE PAYMENT</span><span>Devnet 결제와 실제 자료 조회를 구분해 표시합니다.</span></footer>
-  </main>
+      </section>
+      <section data-page="memory" hidden aria-label="나의 기억"><div class="management-grid"><section class="panel"><div class="section-heading"><h2>기억 추가</h2><span class="small-tag">YOUR CONTEXT</span></div><p class="section-copy">선호하는 보고서 형식이나 분석 관점을 저장하세요. 대화별로 참고 여부를 선택할 수 있습니다.</p><form id="memory-form"><label for="memory-key">기억 이름</label><input id="memory-key" maxlength="64" placeholder="예: 보고서 언어" required><label for="memory-value">기억할 내용</label><textarea id="memory-value" rows="4" maxlength="512" placeholder="예: 한국어로 간단한 요약과 근거를 함께 보여 주세요." required></textarea><label for="memory-expiry">보관 기한 · 최대 90일</label><input id="memory-expiry" type="date" required><label class="check-label"><input id="memory-ack" type="checkbox" required><span>이 내용을 내 지갑 계정의 기억으로 저장합니다.</span></label><button class="button button-dark" type="submit">기억 저장</button></form></section><section class="panel"><div class="section-heading"><h2>저장한 기억</h2><button class="text-button" id="refresh-memory" type="button">새로고침</button></div><div id="memory-list" class="memory-list"></div><button id="more-memory" class="text-button list-more" type="button" hidden>더 보기</button></section></div></section>
+      <section data-page="budgets" hidden aria-label="예산 및 권한"><div id="budget-metrics" class="metric-grid"></div><div class="management-grid"><section class="panel"><div class="section-heading"><h2>범위가 정해진 예산 권한</h2></div><p class="section-copy">목적과 조회 범위가 일치하는 작업에 적용합니다. 실제 실행마다 결제 조건을 별도로 승인합니다.</p><p id="budget-setup-note" class="plan-error" hidden></p><form id="mandate-form"><label for="mandate-purpose">요청 목적 · 작업과 동일하게</label><textarea id="mandate-purpose" rows="2" maxlength="2000" required></textarea><label for="mandate-wallet">분석 지갑</label><input id="mandate-wallet" maxlength="44" autocomplete="off" spellcheck="false" required><div class="date-fields"><div><label for="mandate-start">조회 시작</label><input id="mandate-start" type="datetime-local" step="1" required></div><div><label for="mandate-end">조회 종료</label><input id="mandate-end" type="datetime-local" step="1" required></div></div><div class="date-fields"><div><label for="mandate-total">총 예산 · 기본 단위</label><input id="mandate-total" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" required></div><div><label for="mandate-per">건별 한도 · 기본 단위</label><input id="mandate-per" inputmode="numeric" pattern="[1-9][0-9]*" maxlength="19" required></div></div><div class="date-fields"><div><label for="mandate-count">최대 실행 수</label><input id="mandate-count" type="number" min="1" max="100" value="5" required></div><div><label for="mandate-expiry">권한 기한 · 최대 30일</label><input id="mandate-expiry" type="datetime-local" step="1" required></div></div><label class="check-label"><input id="mandate-ack" type="checkbox" required><span>이 목적·주소·기간과 예산 한도를 승인합니다.</span></label><button id="create-mandate" class="button button-dark" type="submit">예산 권한 만들기</button></form></section><section class="panel"><div class="section-heading"><h2>내 예산 권한</h2><button id="refresh-mandates" class="text-button" type="button">새로고침</button></div><div id="mandate-list" class="mandate-list"></div></section></div><section class="panel ledger-panel"><div class="section-heading"><h2>결제 예산 기록</h2><span class="small-tag">UTC DAY</span></div><p class="section-copy">미확정 거래의 예약액은 유지됩니다. 확인된 거래는 한 번만 사용액에 반영합니다.</p><div id="reservation-list"></div></section></section>
+      <section data-page="activity" hidden aria-label="활동 기록"><section class="panel"><div class="section-heading"><h2>워크스페이스 기록</h2><button id="refresh-activity" class="text-button" type="button">새로고침</button></div><p class="section-copy">대화와 기억의 변경 시점을 확인하세요. 작업별 결제·전달 기록은 해당 작업에서 볼 수 있습니다.</p><div id="activity-list" class="activity-list"></div></section></section>
+      <footer class="site-footer"><span>FLOWW · PURPOSE BEFORE PAYMENT</span><span>Solana Devnet · 목적과 근거를 잇는 워크스페이스</span></footer>
+    </main>
+  </div>
 </body>
 </html>

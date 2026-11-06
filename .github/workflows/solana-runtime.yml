@@ -56,3 +56,15 @@ jobs:
         run: npm test
       - name: Run existing and integrated AI checks
         run: python3 -m unittest discover -s reference/tests -v
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the non-root deployment image
+        run: docker build --tag floww-acceptance:${{ github.sha }} .
+      - name: Verify image imports, private routes and default payment guard
+        run: docker run --rm --network none floww-acceptance:${{ github.sha }} node scripts/container-smoke.mjs

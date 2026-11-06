@@ -19,7 +19,14 @@ All requests require the configured HTTP Host. No CORS grant is supplied.
 
 Task creation POST `/api/tasks` accepts `purpose`, `wallet`, `windowStart` and
 `windowEnd` (UTC ISO strings, explicit window at most seven days). It creates no
-payment authority. POST `/:id/quote` with `{}` obtains an actual x402 V2 challenge
+payment authority. An optional `Idempotency-Key` (1–200 allowed ASCII identifier
+characters) binds this owner's logical request to a canonical body hash. A
+same-key/same-body retry returns the saved task with 201; a changed body returns
+409 IDEMPOTENCY_CONFLICT. The atomic task insert and replay mapping survive
+restart; another owner has a separate key space. Callers must use the task
+returned by the store, including on a replay.
+
+POST `/:id/quote` with `{}` obtains an actual x402 V2 challenge
 from the fixed report merchant. The response includes a public `quote` with
 hash, integer amount, asset, recipient, actual service payer and expiry.
 
@@ -36,11 +43,50 @@ POST `/:id/revoke` revokes future authority. Already observed payment evidence i
 preserved. Result generation independently passes the delivered body through the
 existing Python scope/payment/delivery and canonical-report validators.
 
-GET `/api/tasks` returns `{tasks:[...]}`. GET `/:id`, creation and action calls
-return a public task snapshot directly. Fields include separate `policy`,
+GET `/api/tasks?limit=20&cursor=...&includeArchived=false` returns
+`{tasks:[summary...],nextCursor:string|null}`. The default page is 20, maximum 50.
+The stable cursor binds owner and archive filter, using creation time plus ID.
+Summaries contain identity/scope/status, archivedAt, workspaceContext and
+resultAvailable; they omit results, HTML, Markdown, events, raw bodies and
+proofs. Fetch the selected task's detail lazily. The legacy internal
+`store.list(owner)` remains an array for existing integration adapters;
+`store.page(owner,options)` and `store.dashboard(owner)` supply bounded history
+and all-history counts respectively. Dashboard fields are total, active,
+archived, resultAvailable, recoveryRequired, payment and delivery counts.
+
+POST `/:id/archive` accepts `{acknowledge:true}`; POST `/:id/restore` accepts `{}`.
+Archival preserves the task and purchase evidence. An active operation,
+SIGNING/PENDING/UNKNOWN or a confirmed purchase without a validated delivered
+result returns 409 TASK_UNRESOLVED. Archived tasks remain owner-readable but
+cannot obtain a fresh quote, approval or execution. The 100-task cap counts
+active tasks; archived history does not consume it. Restore and creation share
+the same atomic owner capacity boundary.
+
+GET `/:id`, creation and action calls return a public task snapshot directly.
+Fields include separate `policy`,
 `payment`, `delivery`, `events` and `result`. Owner filtering applies to every
 lookup and mutation. The snapshot excludes signed payloads, raw report bodies,
-private context and database fields. Errors expose `{error:{code}}` only.
+private AI context and database fields. Every response has a server-generated
+X-Request-ID, and errors expose `{error:{code,requestId}}`. Incoming request IDs
+are not trusted. Expensive task operations have per-process/per-owner admission
+limits (default 4/2); saturation returns 429 OPERATION_LIMIT_REACHED with
+Retry-After: 1. This admission bound is per process, while budget reservations
+must be durable and shared across replicas.
+
+The optional server-only workspaceContext binds conversationId, planHash,
+intentRevision, resourceId and mandateId/mandateVersion into the exact quote.
+It is supplied only through the server task factory's fourth argument, remains
+immutable after insertion and is never accepted in client Task JSON. Manual
+tasks remain separate intents with the same payment gates.
+
+`createApp` can mount owner-scoped workspace routes after common guards and
+before static/404 through mountWorkspace(app,context). The context includes
+auth, assertSession, now, respondTask, makeTask, config, store and withOperation.
+Optional taskHooks.beforeClaim runs outside core mutations after fresh terms
+and approval checks; beforeSign runs at the final signer boundary followed by
+another authority/session check. observed runs after durable payment facts,
+including reconciliation, before protected model/result release. Hook errors
+stop further work without erasing saved chain facts or permitting re-signing.
 
 Protected snapshot responses recheck the live session after awaited database or
 gateway work. The result path checks again before model access and after model

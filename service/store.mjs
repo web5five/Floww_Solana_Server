@@ -6,6 +6,59 @@ import { ServiceError, fail } from './config.mjs';
 
 export const digest = value => createHash('sha256').update(value).digest('hex');
 export const randomToken = () => randomBytes(32).toString('base64url');
+export const immutableContext = task => task.workspaceContext === undefined ? 'ABSENT' : task.workspaceContext === null ? 'NULL'
+  : JSON.stringify(Object.entries(task.workspaceContext).sort(([a], [b]) => a.localeCompare(b)));
+export function idempotencyOptions({ idempotencyKey, bodyHash } = {}) {
+  if (idempotencyKey === undefined) return null;
+  if (typeof idempotencyKey !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(idempotencyKey) ||
+      typeof bodyHash !== 'string' || !/^[a-f0-9]{64}$/.test(bodyHash)) fail('INVALID_IDEMPOTENCY_KEY');
+  return { key: idempotencyKey, hash: bodyHash };
+}
+export function pageOptions(owner, { limit = 20, cursor, includeArchived = false } = {}) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50 || typeof includeArchived !== 'boolean') fail('INVALID_PAGE');
+  let after = null;
+  if (cursor !== undefined) {
+    try {
+      if (typeof cursor !== 'string' || cursor.length > 1024 || !/^[A-Za-z0-9_-]+$/.test(cursor)) throw new Error();
+      const decoded = Buffer.from(cursor, 'base64url');
+      if (decoded.toString('base64url') !== cursor) throw new Error();
+      after = JSON.parse(decoded.toString('utf8'));
+      if (Object.keys(after).sort().join(',') !== 'archived,created,id,owner,v' || after.v !== 1 ||
+          after.owner !== digest(owner) || after.archived !== includeArchived ||
+          !Number.isSafeInteger(after.created) || after.created < 0 || typeof after.id !== 'string' ||
+          !/^[A-Za-z0-9._:/-]{1,160}$/.test(after.id)) throw new Error();
+    } catch { fail('INVALID_CURSOR'); }
+  }
+  return { limit, includeArchived, after };
+}
+export const nextCursor = (owner, includeArchived, row) => Buffer.from(JSON.stringify({
+  v: 1, owner: digest(owner), archived: includeArchived, created: Number(row.created), id: row.id,
+})).toString('base64url');
+export function taskSummary(task) {
+  return { ...Object.fromEntries(['id', 'revision', 'purpose', 'wallet', 'windowStart', 'windowEnd', 'createdAt',
+    'archivedAt', 'policy', 'payment', 'delivery', 'reasonCode', 'nextAction', 'workspaceContext']
+    .map(key => [key, task[key] ?? null])), resultAvailable: Boolean(task.result?.answer) };
+}
+export function archiveCheck(task) {
+  if (task.operation || ['SIGNING', 'PENDING', 'UNKNOWN'].includes(task.payment) ||
+      (task.attemptRef && !['CONFIRMED', 'FAILED'].includes(task.payment)) ||
+      (task.payment === 'CONFIRMED' && (task.delivery !== 'COMPLETED' || !task.result?.answer))) fail('TASK_UNRESOLVED', 409);
+}
+export function taskDashboard(rows) {
+  const result = { total: 0, active: 0, archived: 0, resultAvailable: 0, recoveryRequired: 0,
+    payment: Object.fromEntries(['NOT_STARTED', 'SIGNING', 'PENDING', 'UNKNOWN', 'CONFIRMED', 'FAILED'].map(key => [key, 0])),
+    delivery: Object.fromEntries(['NOT_STARTED', 'PENDING', 'COMPLETED', 'FAILED'].map(key => [key, 0])) };
+  for (const row of rows) {
+    const n = Number(row.n), available = row.result_available === true || row.result_available === 1;
+    result.total += n; result[row.archived ? 'archived' : 'active'] += n;
+    if (Object.hasOwn(result.payment, row.payment)) result.payment[row.payment] += n;
+    if (Object.hasOwn(result.delivery, row.delivery)) result.delivery[row.delivery] += n;
+    if (available) result.resultAvailable += n;
+    if (['SIGNING', 'PENDING', 'UNKNOWN'].includes(row.payment) ||
+        (row.payment === 'CONFIRMED' && (row.delivery !== 'COMPLETED' || !available))) result.recoveryRequired += n;
+  }
+  return result;
+}
 export class Store {
   constructor(path, { clock = () => Date.now() } = {}) {
     this.clock = clock;
@@ -24,9 +77,24 @@ export class Store {
       CREATE TABLE IF NOT EXISTS tasks(id TEXT PRIMARY KEY, owner TEXT NOT NULL, revision INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS merchant_receipts(key TEXT PRIMARY KEY, state TEXT NOT NULL, data TEXT);
       CREATE INDEX IF NOT EXISTS challenge_wallet_created ON challenges(wallet,created);
-      CREATE INDEX IF NOT EXISTS task_owner ON tasks(owner);`);
+      CREATE INDEX IF NOT EXISTS task_owner ON tasks(owner);
+      CREATE TABLE IF NOT EXISTS task_idempotency(owner TEXT NOT NULL, request_key TEXT NOT NULL, body_hash TEXT NOT NULL,
+        task_id TEXT NOT NULL REFERENCES tasks(id), PRIMARY KEY(owner,request_key));`);
+    this.transaction(() => {
+      const columns = this.db.prepare('PRAGMA table_info(tasks)').all().map(row => row.name);
+      if (!columns.includes('created')) this.db.exec('ALTER TABLE tasks ADD COLUMN created INTEGER NOT NULL DEFAULT 0');
+      if (!columns.includes('archived')) this.db.exec('ALTER TABLE tasks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+      for (const row of this.db.prepare('SELECT id,data FROM tasks WHERE created=0').all()) {
+        const task = JSON.parse(row.data), time = Date.parse(task.createdAt);
+        this.db.prepare('UPDATE tasks SET created=?,archived=? WHERE id=?').run(
+          Number.isFinite(time) && time > 0 ? time : this.clock(), task.archivedAt ? 1 : 0, row.id);
+      }
+      this.db.exec('CREATE INDEX IF NOT EXISTS task_owner_page ON tasks(owner,archived,created DESC,id DESC)');
+    });
     // A process restart must never permit an uncertain execution to sign again.
-    for (const row of this.db.prepare('SELECT id,owner,data FROM tasks').all()) {
+    for (const row of this.db.prepare(`SELECT id,owner,data FROM tasks WHERE
+      (json_type(data,'$.operation') IS NOT NULL AND json_type(data,'$.operation')<>'null') OR
+      json_extract(data,'$.payment') IN ('SIGNING','PENDING')`).all()) {
       const task = JSON.parse(row.data);
       if (task.operation || ['SIGNING', 'PENDING'].includes(task.payment)) {
         this.mutate(task.id, task.owner, t => {
@@ -78,12 +146,26 @@ export class Store {
     return this.db.prepare('SELECT wallet,expires FROM sessions WHERE hash=? AND expires>?').get(digest(token), this.clock()) || null;
   }
   logout(token) { if (token) this.db.prepare('DELETE FROM sessions WHERE hash=?').run(digest(token)); }
-  add(task) {
-    const count = this.db.prepare('SELECT count(*) AS n FROM tasks WHERE owner=?').get(task.owner).n;
-    if (count >= 100) fail('TASK_LIMIT_REACHED', 429);
-    task.revision = 1;
-    this.db.prepare('INSERT INTO tasks(id,owner,revision,data) VALUES(?,?,?,?)').run(task.id, task.owner, task.revision, JSON.stringify(task));
-    return task;
+  add(task, options) {
+    const request = idempotencyOptions(options);
+    return this.transaction(() => {
+      if (request) {
+        const saved = this.db.prepare('SELECT body_hash,task_id FROM task_idempotency WHERE owner=? AND request_key=?').get(task.owner, request.key);
+        if (saved) {
+          if (saved.body_hash !== request.hash) fail('IDEMPOTENCY_CONFLICT', 409);
+          return this.get(saved.task_id, task.owner);
+        }
+      }
+      const count = this.db.prepare('SELECT count(*) AS n FROM tasks WHERE owner=? AND archived=0').get(task.owner).n;
+      if (count >= 100) fail('TASK_LIMIT_REACHED', 429);
+      task.revision = 1; task.archivedAt = null;
+      task.createdAt ??= new Date(this.clock()).toISOString();
+      this.db.prepare('INSERT INTO tasks(id,owner,revision,data,created,archived) VALUES(?,?,?,?,?,0)').run(
+        task.id, task.owner, task.revision, JSON.stringify(task), Date.parse(task.createdAt));
+      if (request) this.db.prepare('INSERT INTO task_idempotency(owner,request_key,body_hash,task_id) VALUES(?,?,?,?)')
+        .run(task.owner, request.key, request.hash, task.id);
+      return task;
+    });
   }
   get(id, owner) {
     const row = this.db.prepare('SELECT data FROM tasks WHERE id=? AND owner=?').get(id, owner);
@@ -91,10 +173,41 @@ export class Store {
     return JSON.parse(row.data);
   }
   list(owner) { return this.db.prepare('SELECT data FROM tasks WHERE owner=? ORDER BY rowid DESC LIMIT 100').all(owner).map(x => JSON.parse(x.data)); }
+  page(owner, options) {
+    const { limit, after, includeArchived } = pageOptions(owner, options);
+    const args = [owner], clauses = ['owner=?'];
+    if (!includeArchived) clauses.push('archived=0');
+    if (after) { clauses.push('(created<? OR (created=? AND id<?))'); args.push(after.created, after.created, after.id); }
+    const rows = this.db.prepare(`SELECT id,created,json_remove(data,'$.result','$.signedData','$.quoteData','$.aiSnapshot',
+      '$.deliveredBody','$.operation','$.events','$.approval','$.proposal','$.quote') AS data,
+      (json_type(data,'$.result.answer') IS NOT NULL AND json_type(data,'$.result.answer')<>'null') AS result_available
+      FROM tasks WHERE ${clauses.join(' AND ')} ORDER BY created DESC,id DESC LIMIT ?`).all(...args, limit + 1);
+    return { tasks: rows.slice(0, limit).map(row => ({ ...taskSummary(JSON.parse(row.data)), resultAvailable: Boolean(row.result_available) })),
+      nextCursor: rows.length > limit ? nextCursor(owner, includeArchived, rows[limit - 1]) : null };
+  }
+  dashboard(owner) {
+    return taskDashboard(this.db.prepare(`SELECT archived,json_extract(data,'$.payment') AS payment,
+      json_extract(data,'$.delivery') AS delivery,
+      (json_type(data,'$.result.answer') IS NOT NULL AND json_type(data,'$.result.answer')<>'null') AS result_available,
+      count(*) AS n FROM tasks WHERE owner=? GROUP BY archived,payment,delivery,result_available`).all(owner));
+  }
+  archive(id, owner) { return this.mutate(id, owner, task => { archiveCheck(task); task.archivedAt ??= new Date(this.clock()).toISOString(); }); }
+  restore(id, owner) {
+    return this.transaction(() => {
+      const task = this.get(id, owner);
+      if (task.archivedAt && this.db.prepare('SELECT count(*) AS n FROM tasks WHERE owner=? AND archived=0').get(owner).n >= 100) fail('TASK_LIMIT_REACHED', 429);
+      task.archivedAt = null; task.revision++;
+      this.db.prepare('UPDATE tasks SET revision=?,data=?,archived=0 WHERE id=? AND owner=?').run(task.revision, JSON.stringify(task), id, owner);
+      return task;
+    });
+  }
   mutate(id, owner, fn) {
     return this.transaction(() => {
-      const t = this.get(id, owner); fn(t); t.revision++;
-      this.db.prepare('UPDATE tasks SET revision=?,data=? WHERE id=? AND owner=?').run(t.revision, JSON.stringify(t), id, owner);
+      const t = this.get(id, owner), context = immutableContext(t), result = fn(t);
+      if (result && typeof result.then === 'function') { Promise.resolve(result).catch(() => {}); fail('ASYNC_MUTATION_NOT_ALLOWED', 500); }
+      if (t.id !== id || t.owner !== owner || immutableContext(t) !== context) fail('TASK_IDENTITY_CHANGED', 500);
+      t.revision++;
+      this.db.prepare('UPDATE tasks SET revision=?,data=?,archived=? WHERE id=? AND owner=?').run(t.revision, JSON.stringify(t), t.archivedAt ? 1 : 0, id, owner);
       return t;
     });
   }

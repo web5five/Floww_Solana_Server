@@ -377,3 +377,62 @@ test('PostgreSQL initialization and rollback failures release connections withou
   await assert.rejects(store.transaction(() => { throw new Error('SECRET action'); }), { code: 'STATE_UNAVAILABLE' });
   assert.equal(broken.released[0].message, 'STATE_UNAVAILABLE');
 });
+
+real('PostgreSQL task idempotency has one owner-scoped winner across independent pools', async () => {
+  const wallet = owner(), options = { idempotencyKey: 'same-client-request', bodyHash: 'a'.repeat(64) };
+  const responses = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+    (index % 2 ? first : second).add(task(wallet), options)));
+  assert.equal(new Set(responses.map(value => value.id)).size, 1);
+  assert.equal((await first.dashboard(wallet)).total, 1);
+  await assert.rejects(second.add(task(wallet), { ...options, bodyHash: 'b'.repeat(64) }), { code: 'IDEMPOTENCY_CONFLICT' });
+  const reopened = await PostgresStore.open(cluster.url, { clock });
+  try { assert.equal((await reopened.add(task(wallet), options)).id, responses[0].id); }
+  finally { await reopened.close(); }
+  const other = await second.add(task(owner()), options); assert.notEqual(other.id, responses[0].id);
+});
+real('PostgreSQL summary cursor pages and dashboard stay scoped and exclude large private reports', async () => {
+  const wallet = owner(), ids = [];
+  for (let i = 0; i < 45; i++) {
+    const value = task(wallet); ids.push(value.id);
+    value.payment = 'CONFIRMED'; value.delivery = 'COMPLETED';
+    value.result = { answer: { summary: 'fixture only' }, html: 'large-private-result'.repeat(1000) };
+    value.signedData = { paymentHeader: 'private-proof' }; value.deliveredBody = 'merchant-body';
+    await first.add(value);
+  }
+  ids.sort().reverse();
+  const a = await first.page(wallet), b = await second.page(wallet, { cursor: a.nextCursor }),
+    c = await first.page(wallet, { cursor: b.nextCursor });
+  assert.deepEqual([...a.tasks, ...b.tasks, ...c.tasks].map(task => task.id), ids);
+  assert.equal(a.tasks.length, 20); assert.equal(b.tasks.length, 20); assert.equal(c.tasks.length, 5);
+  assert.equal(c.nextCursor, null); assert.ok(a.tasks.every(task => task.resultAvailable));
+  assert.doesNotMatch(JSON.stringify(a), /large-private-result|private-proof|merchant-body|"result"|"html"|"signedData"/);
+  await assert.rejects(first.page(owner(), { cursor: a.nextCursor }), { code: 'INVALID_CURSOR' });
+  await assert.rejects(first.page(wallet, { limit: 51 }), { code: 'INVALID_PAGE' });
+  await first.archive(ids[0], wallet);
+  assert.equal((await second.page(wallet)).tasks[0].id, ids[1]);
+  assert.equal((await second.page(wallet, { includeArchived: true })).tasks[0].id, ids[0]);
+  const stats = await first.dashboard(wallet);
+  assert.equal(stats.total, 45); assert.equal(stats.active, 44); assert.equal(stats.archived, 1);
+  assert.equal(stats.resultAvailable, 45); assert.equal(stats.payment.CONFIRMED, 45);
+  assert.equal((await second.get(ids[0], wallet)).signedData.paymentHeader, 'private-proof');
+});
+real('PostgreSQL active capacity is atomic across creation and restore and cannot archive uncertainty', async () => {
+  const wallet = owner(), values = Array.from({ length: 100 }, () => task(wallet));
+  for (const value of values) await first.add(value);
+  await first.archive(values[0].id, wallet);
+  const race = await Promise.allSettled([first.restore(values[0].id, wallet), second.add(task(wallet))]);
+  assert.equal(race.filter(value => value.status === 'fulfilled').length, 1);
+  assert.equal(race.filter(value => value.status === 'rejected')[0].reason.code, 'TASK_LIMIT_REACHED');
+  assert.equal((await first.dashboard(wallet)).active, 100);
+  await first.mutate(values[1].id, wallet, task => { task.payment = 'UNKNOWN'; task.signedData = { paymentHeader: 'original' }; });
+  await assert.rejects(second.archive(values[1].id, wallet), { code: 'TASK_UNRESOLVED' });
+  assert.equal((await first.get(values[1].id, wallet)).signedData.paymentHeader, 'original');
+  await assert.rejects(second.archive(values[1].id, owner()), { code: 'TASK_NOT_FOUND' });
+});
+real('PostgreSQL task workspace authority is immutable under rejected or async mutations', async () => {
+  const value = task(); value.workspaceContext = { conversationId: 'owned-conversation', planHash: 'a'.repeat(64) };
+  await first.add(value);
+  await assert.rejects(second.mutate(value.id, value.owner, task => { task.workspaceContext.planHash = 'changed'; }), { code: 'TASK_IDENTITY_CHANGED' });
+  await assert.rejects(second.mutate(value.id, value.owner, task => { task.workspaceContext = undefined; }), { code: 'TASK_IDENTITY_CHANGED' });
+  assert.equal((await first.get(value.id, value.owner)).workspaceContext.planHash, 'a'.repeat(64));
+});

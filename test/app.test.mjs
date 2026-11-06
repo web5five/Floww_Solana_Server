@@ -5,14 +5,15 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { getBase58Decoder } from '@solana/kit';
 import { createApp } from '../service/app.mjs';
 import { Store } from '../service/store.mjs';
-import { loadConfig } from '../service/config.mjs';
+import { loadConfig, ServiceError } from '../service/config.mjs';
 
 function keypair() {
   const kp = generateKeyPairSync('ed25519'); return { ...kp,
     address: getBase58Decoder().decode(kp.publicKey.export({ format: 'der', type: 'spki' }).subarray(-32)) };
 }
 const signature = getBase58Decoder().decode(Uint8Array.from({ length: 64 }, (_, i) => i + 1));
-async function setup({ asyncStore = false, sessionTtlMs = 8 * 3600_000 } = {}) {
+async function setup({ asyncStore = false, sessionTtlMs = 8 * 3600_000, taskHooks, mountWorkspace,
+  maxConcurrentOperations = 4, maxOwnerConcurrentOperations = 2 } = {}) {
   let time = Date.UTC(2026, 10, 5, 12), signs = 0, redemptions = 0, gets = 0, consumes = 0;
   const rawStore = new Store(':memory:', { clock: () => time });
   const store = asyncStore ? new Proxy(rawStore, { get(obj, prop) {
@@ -22,7 +23,8 @@ async function setup({ asyncStore = false, sessionTtlMs = 8 * 3600_000 } = {}) {
   const server = createServer(); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`, payer = keypair().address;
   const config = { ...loadConfig({ MERCHANT_PAY_TO: keypair().address }), origin, publicOrigin: origin,
-    merchantOrigin: origin, merchantBaseUrl: origin + '/merchant/reports', paymentEnabled: true, sessionTtlMs };
+    merchantOrigin: origin, merchantBaseUrl: origin + '/merchant/reports', paymentEnabled: true, sessionTtlMs,
+    maxConcurrentOperations, maxOwnerConcurrentOperations };
   const control = { ready: true, changed: false, outcome: null, signHook: null, redeemHook: null, reconcileHook: null, aiHook: null, pause: null };
   const gateway = {
     async readiness() { return { ready: control.ready, payer, missing: control.ready ? [] : ['payment_enabled'] }; },
@@ -48,7 +50,7 @@ async function setup({ asyncStore = false, sessionTtlMs = 8 * 3600_000 } = {}) {
       return { status: 'EVIDENCE_READY', code: 'ANALYTICS_SUMMARY', answer: { is_synthetic: true, transfer_count: 0 }, html: '<p>Scripted test</p>', markdown: 'Scripted test' };
     },
   };
-  server.on('request', createApp({ config, store, gateway, ai }));
+  server.on('request', createApp({ config, store, gateway, ai, taskHooks, mountWorkspace }));
   async function request(path, { method = 'GET', body, cookie, headers = {} } = {}) {
     const response = await fetch(origin + path, { method, headers: { ...(method !== 'GET' ? { Origin: origin, 'Content-Type': 'application/json' } : {}),
       ...(cookie ? { Cookie: cookie } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -197,7 +199,8 @@ test('logout while AI is awaited prevents result persistence and protected respo
     const a = await f.login(), t = await f.approved(a.cookie);
     f.control.aiHook = async () => { await f.request('/api/auth/logout', { method: 'POST', cookie: a.cookie, body: {} }); };
     const response = await execute(f, a.cookie, t);
-    assert.equal(response.status, 401); assert.deepEqual(response.body, { error: { code: 'AUTHENTICATION_REQUIRED' } });
+    assert.equal(response.status, 401); assert.equal(response.body.error.code, 'AUTHENTICATION_REQUIRED');
+    assert.equal(response.body.error.requestId, response.headers.get('x-request-id'));
     const persisted = f.rawStore.get(t.id, a.kp.address);
     assert.equal(persisted.result, null); assert.equal(persisted.payment, 'CONFIRMED'); assert.equal(persisted.delivery, 'COMPLETED');
     assert.equal(f.counts().signs, 1);
@@ -273,5 +276,158 @@ test('expiry during the session database await is checked against the current cl
     f.rawStore.session = async value => { const result = session(value); f.advance(1000); return result; };
     const response = await f.request('/api/session', { cookie: a.cookie });
     assert.equal(response.status, 401); assert.equal(response.body.wallet, undefined);
+  } finally { await f.close(); }
+});
+
+test('task creation retry is owner-scoped, body-bound and atomic without duplicate events', async () => {
+  const f = await setup({ asyncStore: true }); try {
+    const a = await f.login(), b = await f.login();
+    const body = { purpose: 'Retry-safe transfer report', wallet: a.kp.address,
+      windowStart: '2026-11-04T00:00:00.000Z', windowEnd: '2026-11-05T00:00:00.000Z' };
+    const request = (cookie, value = body) => f.request('/api/tasks', { method: 'POST', cookie, body: value,
+      headers: { 'Idempotency-Key': 'request-123' } });
+    const replies = await Promise.all(Array.from({ length: 8 }, () => request(a.cookie)));
+    assert.ok(replies.every(reply => reply.status === 201));
+    assert.equal(new Set(replies.map(reply => reply.body.id)).size, 1);
+    assert.equal(f.rawStore.list(a.kp.address).length, 1);
+    assert.equal(replies[0].body.events.filter(event => event.type === 'TASK_CREATED').length, 1);
+    const changed = await request(a.cookie, { ...body, purpose: 'different purpose' });
+    assert.equal(changed.status, 409); assert.equal(changed.body.error.code, 'IDEMPOTENCY_CONFLICT');
+    const other = await request(b.cookie); assert.equal(other.status, 201); assert.notEqual(other.body.id, replies[0].body.id);
+    const malformed = await f.request('/api/tasks', { method: 'POST', cookie: a.cookie, body,
+      headers: { 'Idempotency-Key': 'bad key' } });
+    assert.equal(malformed.status, 400); assert.equal(f.counts().signs, 0);
+  } finally { await f.close(); }
+});
+test('history uses bounded summaries and lazy details even when saved reports exceed the browser limit', async () => {
+  const f = await setup(); try {
+    const a = await f.login(), b = await f.login();
+    for (let i = 0; i < 35; i++) f.rawStore.add({ id: 'history-' + String(i).padStart(3, '0'), owner: a.kp.address,
+      purpose: 'Report ' + i, payment: 'CONFIRMED', delivery: 'COMPLETED', events: [],
+      result: { answer: { summary: 'fixture only' }, html: 'large-report'.repeat(5000), markdown: 'private-report'.repeat(5000) },
+      signedData: { paymentHeader: 'private-proof' }, deliveredBody: 'private-merchant-body' });
+    const first = await f.request('/api/tasks', { cookie: a.cookie });
+    assert.equal(first.status, 200); assert.equal(first.body.tasks.length, 20); assert.ok(first.body.nextCursor);
+    assert.ok(first.body.tasks.every(task => task.resultAvailable));
+    assert.ok(JSON.stringify(first.body).length < 30000);
+    assert.doesNotMatch(JSON.stringify(first.body), /private-proof|private-merchant|large-report|private-report|"result"|"html"/);
+    const next = await f.request('/api/tasks?cursor=' + first.body.nextCursor, { cookie: a.cookie });
+    assert.equal(next.body.tasks.length, 15); assert.equal(next.body.nextCursor, null);
+    assert.equal(new Set([...first.body.tasks, ...next.body.tasks].map(task => task.id)).size, 35);
+    const detail = await f.request('/api/tasks/' + first.body.tasks[0].id, { cookie: a.cookie });
+    assert.equal(detail.body.result.answer.summary, 'fixture only'); assert.match(detail.body.result.html, /large-report/);
+    assert.equal((await f.request('/api/tasks?cursor=' + first.body.nextCursor, { cookie: b.cookie })).status, 400);
+    assert.equal((await f.request('/api/tasks?limit=51', { cookie: a.cookie })).status, 400);
+    assert.equal((await f.request('/api/tasks?limit=0', { cookie: a.cookie })).status, 400);
+    assert.equal((await f.request('/api/tasks?includeArchived=yes', { cookie: a.cookie })).status, 400);
+    assert.equal((await f.request('/api/tasks?limit=20&limit=30', { cookie: a.cookie })).status, 400);
+  } finally { await f.close(); }
+});
+test('archive preserves private evidence, refuses uncertainty and separates active capacity from history', async () => {
+  const f = await setup(); try {
+    const a = await f.login(), b = await f.login(), t = await f.approved(a.cookie);
+    const path = '/api/tasks/' + t.id;
+    assert.equal((await f.request(path + '/archive', { method: 'POST', cookie: b.cookie, body: { acknowledge: true } })).status, 404);
+    f.control.outcome = { payment: 'UNKNOWN', delivery: 'PENDING', reasonCode: 'SETTLEMENT_UNKNOWN' };
+    await execute(f, a.cookie, t);
+    const unresolved = await f.request(path + '/archive', { method: 'POST', cookie: a.cookie, body: { acknowledge: true } });
+    assert.equal(unresolved.status, 409); assert.equal(unresolved.body.error.code, 'TASK_UNRESOLVED');
+    await f.request(path + '/reconcile', { method: 'POST', cookie: a.cookie, body: {} });
+    assert.equal((await f.request(path + '/archive', { method: 'POST', cookie: a.cookie, body: { acknowledge: true } })).status, 409);
+    f.control.outcome = null; await f.request(path + '/recover', { method: 'POST', cookie: a.cookie, body: {} });
+    const archived = await f.request(path + '/archive', { method: 'POST', cookie: a.cookie, body: { acknowledge: true } });
+    assert.equal(archived.status, 200); assert.ok(archived.body.archivedAt);
+    assert.equal((await f.request('/api/tasks', { cookie: a.cookie })).body.tasks.length, 0);
+    assert.equal((await f.request('/api/tasks?includeArchived=true', { cookie: a.cookie })).body.tasks.length, 1);
+    assert.equal(f.rawStore.get(t.id, a.kp.address).signedData.paymentHeader, 'scripted-private-proof');
+    const restored = await f.request(path + '/restore', { method: 'POST', cookie: a.cookie, body: {} });
+    assert.equal(restored.status, 200); assert.equal(restored.body.archivedAt, null); assert.equal(f.counts().signs, 1);
+    const untouched = await f.approved(a.cookie);
+    await f.request('/api/tasks/' + untouched.id + '/archive', { method: 'POST', cookie: a.cookie, body: { acknowledge: true } });
+    assert.equal((await execute(f, a.cookie, untouched)).body.error.code, 'TASK_ARCHIVED');
+    assert.equal(f.counts().signs, 1);
+  } finally { await f.close(); }
+});
+test('server request IDs are returned on errors and never trust an incoming identifier', async () => {
+  const f = await setup(); try {
+    const a = await f.request('/api/tasks', { headers: { 'X-Request-ID': 'attacker-chosen-value' } });
+    const b = await f.request('/missing');
+    for (const r of [a, b]) {
+      assert.match(r.headers.get('x-request-id'), /^[a-f0-9-]{36}$/);
+      assert.equal(r.body.error.requestId, r.headers.get('x-request-id'));
+    }
+    assert.notEqual(a.body.error.requestId, b.body.error.requestId);
+    assert.notEqual(a.body.error.requestId, 'attacker-chosen-value');
+  } finally { await f.close(); }
+});
+test('operation admission bounds each owner and the process and releases slots after completion', async () => {
+  const f = await setup({ maxConcurrentOperations: 2, maxOwnerConcurrentOperations: 1 }); let unblock;
+  try {
+    const a = await f.login(), b = await f.login(), c = await f.login();
+    const one = await f.approved(a.cookie), two = await f.approved(a.cookie), three = await f.approved(b.cookie), queued = await f.task(c.cookie);
+    const gate = new Promise(resolve => { unblock = resolve; }); let entered = 0;
+    f.control.signHook = async () => { entered++; await gate; };
+    const first = execute(f, a.cookie, one);
+    while (entered < 1) await new Promise(resolve => setImmediate(resolve));
+    const ownerLimit = await execute(f, a.cookie, two);
+    assert.equal(ownerLimit.status, 429); assert.equal(ownerLimit.headers.get('retry-after'), '1');
+    const second = execute(f, b.cookie, three);
+    while (entered < 2) await new Promise(resolve => setImmediate(resolve));
+    const globalLimit = await f.request('/api/tasks/' + queued.id + '/quote', { method: 'POST', cookie: c.cookie, body: {} });
+    assert.equal(globalLimit.status, 429); assert.equal(globalLimit.body.error.code, 'OPERATION_LIMIT_REACHED');
+    assert.equal((await f.request('/api/session', { cookie: a.cookie })).status, 200);
+    unblock(); assert.ok((await Promise.all([first, second])).every(reply => reply.status === 200));
+    f.control.signHook = null; assert.equal((await execute(f, a.cookie, two)).status, 200);
+    assert.equal(f.counts().signs, 3);
+  } finally { unblock?.(); await f.close(); }
+});
+test('claim and signer hooks fail closed and observed facts run before session-protected result release', async () => {
+  let denied = true, revoke = false; const observations = []; let f, actor;
+  const hooks = {
+    beforeClaim: async ({ task, owner }) => {
+      assert.equal(owner, actor.kp.address); assert.equal(task.payment, 'NOT_STARTED');
+      if (denied) throw new ServiceError('GLOBAL_BUDGET_DENIED', 403);
+    },
+    beforeSign: async ({ task, owner }) => {
+      assert.equal(task.payment, 'SIGNING');
+      if (revoke) f.rawStore.mutate(task.id, owner, current => { current.approval.revoked = true; });
+    },
+    observed: async ({ task, owner }) => { observations.push({ payment: task.payment, owner }); },
+  };
+  f = await setup({ taskHooks: hooks }); try {
+    actor = await f.login(); const t = await f.approved(actor.cookie);
+    assert.equal((await execute(f, actor.cookie, t)).body.error.code, 'GLOBAL_BUDGET_DENIED');
+    assert.equal(f.counts().signs, 0); assert.equal(f.rawStore.get(t.id, actor.kp.address).attemptRef, undefined);
+    denied = false; revoke = true;
+    assert.equal((await execute(f, actor.cookie, t)).status, 403); assert.equal(f.counts().signs, 0);
+    assert.equal(f.rawStore.get(t.id, actor.kp.address).payment, 'UNKNOWN');
+    revoke = false; const next = await f.approved(actor.cookie);
+    f.control.redeemHook = () => f.request('/api/auth/logout', { method: 'POST', cookie: actor.cookie, body: {} });
+    assert.equal((await execute(f, actor.cookie, next)).status, 401);
+    assert.deepEqual(observations, [{ payment: 'CONFIRMED', owner: actor.kp.address }]);
+    assert.equal(f.rawStore.get(next.id, actor.kp.address).payment, 'CONFIRMED'); assert.equal(f.counts().consumes, 0);
+  } finally { await f.close(); }
+});
+test('workspace extension inherits guards, immutable server metadata and bounded execution port', async () => {
+  let context;
+  const f = await setup({ mountWorkspace: (app, value) => {
+    context = value;
+    app.get('/api/workspace-contract', async (req, res) => {
+      const owner = (await value.auth(req)).wallet;
+      await value.assertSession(req, owner); res.json(await value.store.dashboard(owner));
+    });
+  } }); try {
+    const a = await f.login(); assert.equal((await f.request('/api/workspace-contract')).status, 401);
+    assert.equal((await f.request('/api/workspace-contract', { cookie: a.cookie })).body.total, 0);
+    const input = { purpose: 'Confirmed plan', wallet: a.kp.address,
+      windowStart: '2026-11-04T00:00:00.000Z', windowEnd: '2026-11-05T00:00:00.000Z' };
+    const metadata = { conversationId: 'conversation-1', planHash: 'a'.repeat(64), intentRevision: 1,
+      resourceId: 'wallet-transfers', mandateId: null, mandateVersion: null };
+    const task = context.makeTask(input, a.kp.address, context.now(), metadata);
+    context.store.add(task); assert.equal(typeof context.withOperation, 'function');
+    const detail = await f.request('/api/tasks/' + task.id, { cookie: a.cookie });
+    assert.deepEqual(detail.body.workspaceContext, metadata);
+    assert.throws(() => context.store.mutate(task.id, a.kp.address, current => { current.workspaceContext.intentRevision++; }), /TASK_IDENTITY_CHANGED/);
+    assert.equal((await f.request('/api/tasks', { method: 'POST', cookie: a.cookie, body: { ...input, workspaceContext: metadata } })).status, 400);
   } finally { await f.close(); }
 });

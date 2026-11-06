@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
 // Check only this integration's owned source trees; never rewrite other work.
-const roots = ['service', 'test', 'scripts', 'docs/integration'];
+const roots = ['service', 'test', 'scripts', 'docs/integration', 'docs/production'];
 let checked = 0;
 async function walk(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {

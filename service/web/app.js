@@ -1,7 +1,9 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const state = { wallet: null, health: null, tasks: [], activeId: null, initializing: true, busy: false, busyLabel: '', approvalHash: null, provider: null };
+  const state = { wallet: null, health: null, tasks: [], activeId: null, initializing: true, busy: false, busyLabel: '', approvalHash: null, provider: null,
+    nextCursor: null, pendingCreate: null, sessionEpoch: 0 };
+  let announcedWallet;
   const policyNames = { PENDING: '승인 대기', ALLOW: '승인됨', DENY: '승인되지 않음' };
   const paymentNames = { NOT_STARTED: '시작 전', SIGNING: '서명 준비 중', PENDING: '확인 중', UNKNOWN: '확인 필요', CONFIRMED: '결제 확인됨', FAILED: '거래 실패' };
   const deliveryNames = { NOT_STARTED: '시작 전', PENDING: '전달 확인 중', COMPLETED: '전달 완료', FAILED: '전달 확인 필요' };
@@ -59,16 +61,18 @@
   function clearNotice() { $('notice').hidden = true; $('notice-text').textContent = ''; }
   function announce(text) { $('live-status').textContent = text; }
 
-  async function api(path, method = 'GET', body) {
+  async function api(path, method = 'GET', body, extraHeaders = {}) {
+    const epoch = state.sessionEpoch;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 45_000);
     try {
       const response = await fetch(path, { method, credentials: 'same-origin', redirect: 'error',
-        headers: body === undefined ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' },
+        headers: { ...(body === undefined ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' }), ...extraHeaders },
         body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,
       });
+      const text = response.status === 204 ? '' : await response.text();
+      if (epoch !== state.sessionEpoch) throw { code: 'AUTHENTICATION_REQUIRED', stale: true };
       if (response.status === 204) return null;
-      const text = await response.text();
       if (text.length > 2_000_000) throw { code: 'RESPONSE_UNAVAILABLE' };
       let result;
       try { result = JSON.parse(text); } catch { throw { code: 'RESPONSE_UNAVAILABLE' }; }
@@ -81,7 +85,14 @@
   }
 
   function clearSession() {
-    state.wallet = null; state.tasks = []; state.activeId = null; state.approvalHash = null;
+    state.sessionEpoch++;
+    state.wallet = null; state.tasks = []; state.activeId = null; state.approvalHash = null; state.nextCursor = null; state.pendingCreate = null;
+    $('request-form').reset(); $('approval-form').reset(); $('include-archived').checked = false;
+    $('window-end').value = localDate(Date.now() - 1000); $('window-start').value = localDate(Date.now() - 86_400_000);
+    clearNotice();
+    for (const id of ['result-content', 'timeline', 'quote-details']) $(id).replaceChildren();
+    for (const id of ['task-meta', 'quote-price', 'quote-atomic', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) $(id).textContent = '';
+    $('execution-title').textContent = '선택한 요청'; $('transaction-link').removeAttribute('href');
     render();
   }
   async function perform(label, action) {
@@ -90,13 +101,14 @@
     updateControls();
     try { await action(); announce(label.replace(/\s중$/, '') + ' 완료'); }
     catch (error) {
+      if (error?.stale) return;
       if (error?.status === 401) clearSession();
       notice(error?.code);
     } finally { state.busy = false; state.busyLabel = ''; render(); }
   }
 
   function taskSummary(task) {
-    if (task.result?.answer) return { text: '분석 완료', className: 'success' };
+    if (task.result?.answer || task.resultAvailable) return { text: '분석 완료', className: 'success' };
     if (task.payment === 'CONFIRMED') return { text: task.delivery === 'COMPLETED' ? '자료 전달됨' : '자료 복구 필요', className: task.delivery === 'COMPLETED' ? 'success' : 'warning' };
     if (task.payment === 'FAILED') return { text: '거래 실패', className: 'error' };
     if (task.payment === 'UNKNOWN') return { text: '거래 확인 필요', className: 'warning' };
@@ -127,13 +139,14 @@
   function renderHistory() {
     $('task-count').textContent = String(state.tasks.length);
     $('history-empty').hidden = state.tasks.length > 0;
+    $('more-tasks').hidden = !state.nextCursor;
     $('task-list').replaceChildren(...state.tasks.map(task => {
       const button = element('button', null, 'task-item' + (task.id === state.activeId ? ' selected' : ''));
       button.type = 'button'; button.disabled = state.busy;
       button.setAttribute('aria-pressed', String(task.id === state.activeId));
       button.append(element('span', task.purpose, 'task-item-title'));
       const meta = element('span', null, 'task-item-meta');
-      meta.append(element('span', dateText(task.createdAt)), element('span', taskSummary(task).text, 'task-item-state'));
+      meta.append(element('span', dateText(task.createdAt)), element('span', task.archivedAt ? '보관됨 · ' + taskSummary(task).text : taskSummary(task).text, 'task-item-state'));
       button.append(meta);
       button.addEventListener('click', () => perform('요청 상태 확인 중', async () => {
         const selected = await api('/api/tasks/' + encodeURIComponent(task.id));
@@ -247,13 +260,14 @@
     $('refresh-tasks').disabled = !authenticated || busy;
     $('login-hint').hidden = authenticated;
     document.querySelectorAll('.task-item').forEach(button => { button.disabled = busy; });
-    for (const input of document.querySelectorAll('form input,form textarea')) input.disabled = busy;
+    for (const input of document.querySelectorAll('#workspace form input,#workspace form textarea')) input.disabled = busy;
+    $('include-archived').disabled = busy || !authenticated; $('more-tasks').disabled = busy || !authenticated;
     $('action-status').textContent = busy ? state.busyLabel + '…' : '';
     if (!task) return;
     $('task-guidance').textContent = guidance(task);
     const status = taskSummary(task);
     $('task-state').textContent = status.text; $('task-state').className = 'state-pill ' + status.className;
-    const notStarted = task.payment === 'NOT_STARTED';
+    const notStarted = task.payment === 'NOT_STARTED' && !task.archivedAt;
     $('quote-task').hidden = !notStarted;
     $('quote-task').textContent = task.quote ? '결제 조건 다시 확인' : '결제 조건 확인';
     $('quote-task').disabled = busy || !authenticated;
@@ -268,18 +282,37 @@
     $('recover-task').hidden = task.payment !== 'CONFIRMED' || Boolean(task.result?.answer);
     $('recover-task').disabled = busy || !authenticated || Boolean(task.approval?.revoked);
     $('refresh-task').disabled = busy || !authenticated;
+    $('archive-task').hidden = Boolean(task.archivedAt);
+    $('archive-task').disabled = busy || !authenticated || ['SIGNING', 'PENDING', 'UNKNOWN'].includes(task.payment);
+    $('restore-task').hidden = !task.archivedAt; $('restore-task').disabled = busy || !authenticated;
   }
-  function render() { renderHealth(); renderHistory(); renderSelection(); updateControls(); }
+  function render() {
+    renderHealth(); renderHistory(); renderSelection(); updateControls();
+    if (announcedWallet !== state.wallet) { announcedWallet = state.wallet; emitSession(); }
+  }
+  function emitSession() { window.dispatchEvent(new CustomEvent('floww:session', { detail: { wallet: state.wallet, health: state.health } })); }
   function acceptTask(task) {
     if (!task || typeof task.id !== 'string') throw { code: 'RESPONSE_UNAVAILABLE' };
     const index = state.tasks.findIndex(old => old.id === task.id);
     if (index < 0) state.tasks.unshift(task);
     else if (Number(task.revision) >= Number(state.tasks[index].revision)) state.tasks[index] = task;
+    window.dispatchEvent(new CustomEvent('floww:task-updated', { detail: { id: task.id } }));
   }
-  async function loadTasks() {
-    const result = await api('/api/tasks');
-    state.tasks = Array.isArray(result.tasks) ? result.tasks : [];
+  async function loadTasks(more = false) {
+    const query = new URLSearchParams({ limit: '20', includeArchived: String($('include-archived').checked) });
+    if (more && state.nextCursor) query.set('cursor', state.nextCursor);
+    const result = await api('/api/tasks?' + query);
+    if (!state.wallet) return;
+    const old = state.tasks;
+    const page = Array.isArray(result.tasks) ? result.tasks : [];
+    const known = new Map((more ? old : []).map(task => [task.id, task]));
+    for (const task of page) {
+      const detail = old.find(item => item.id === task.id);
+      known.set(task.id, detail && detail.revision === task.revision ? { ...detail, ...task } : task);
+    }
+    state.tasks = [...known.values()]; state.nextCursor = result.nextCursor ?? null;
     if (!state.tasks.some(task => task.id === state.activeId)) state.activeId = state.tasks[0]?.id ?? null;
+    if (state.activeId) await refreshSelected();
   }
   async function selectedAction(action, body = {}) {
     const task = active();
@@ -311,7 +344,7 @@
     if (!(bytes instanceof Uint8Array) || bytes.length !== 64) throw { code: 'INVALID_SIGNATURE' };
     const signature = btoa(String.fromCharCode(...bytes));
     const session = await api('/api/auth/verify', 'POST', { wallet, challengeId: challenge.challengeId, signature });
-    state.wallet = session.wallet;
+    state.sessionEpoch++; state.wallet = session.wallet;
     if (!$('report-wallet').value.trim()) $('report-wallet').value = session.wallet;
     if (state.provider !== provider) {
       state.provider = provider;
@@ -328,6 +361,18 @@
     await api('/api/auth/logout', 'POST', {}); clearSession();
   }));
   $('refresh-tasks').addEventListener('click', () => perform('요청 목록 확인 중', loadTasks));
+  $('include-archived').addEventListener('change', () => perform('보관함 확인 중', () => loadTasks()));
+  $('more-tasks').addEventListener('click', () => perform('이전 요청 확인 중', () => loadTasks(true)));
+  $('archive-task').addEventListener('click', () => perform('요청 보관 중', async () => { await selectedAction('archive', { acknowledge: true }); await loadTasks(); }));
+  $('restore-task').addEventListener('click', () => perform('요청 복원 중', async () => { await selectedAction('restore'); await loadTasks(); }));
+  window.addEventListener('floww:session-refresh', emitSession);
+  window.addEventListener('floww:session-expired', event => { if (state.wallet && event.detail?.wallet === state.wallet) clearSession(); });
+  window.addEventListener('floww:select-task', event => perform('작업 상세 확인 중', async () => {
+    const id = event.detail?.id;
+    if (!state.wallet || typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)) return;
+    const task = await api('/api/tasks/' + encodeURIComponent(id));
+    if (state.wallet) { acceptTask(task); state.activeId = task.id; }
+  }));
   $('refresh-task').addEventListener('click', () => perform('실행 상태 확인 중', refreshSelected));
   $('quote-task').addEventListener('click', () => perform('결제 조건 확인 중', () => selectedAction('quote')));
   $('execute-task').addEventListener('click', () => perform('승인한 결제 실행 중', async () => {
@@ -361,8 +406,11 @@
       const start = new Date($('window-start').value), end = new Date($('window-end').value);
       if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) ||
           start >= end || end.getTime() > Date.now() || end - start > 7 * 86_400_000) throw { code: 'INVALID_ANALYTICS_SCOPE' };
-      const task = await api('/api/tasks', 'POST', { purpose: $('purpose').value.trim(), wallet: $('report-wallet').value.trim(),
-        windowStart: start.toISOString(), windowEnd: end.toISOString() });
+      const body = { purpose: $('purpose').value.trim(), wallet: $('report-wallet').value.trim(), windowStart: start.toISOString(), windowEnd: end.toISOString() };
+      const serialized = JSON.stringify(body);
+      if (state.pendingCreate?.serialized !== serialized) state.pendingCreate = { serialized, key: crypto.randomUUID() };
+      const task = await api('/api/tasks', 'POST', body, { 'Idempotency-Key': state.pendingCreate.key });
+      state.pendingCreate = null;
       acceptTask(task); state.activeId = task.id;
     });
   });
@@ -384,7 +432,7 @@
     if (!task || !(['SIGNING', 'PENDING', 'UNKNOWN'].includes(task.payment) || task.delivery === 'PENDING')) return;
     polling = true;
     try { await refreshSelected(); if (!state.busy) render(); }
-    catch (error) { if (error.status === 401) clearSession(); }
+    catch (error) { if (!error.stale && error.status === 401) clearSession(); }
     finally { polling = false; }
   }, 5000);
   window.addEventListener('pagehide', () => clearInterval(poll), { once: true });
@@ -395,7 +443,7 @@
     try { state.health = await api('/api/health'); } catch { /* keep an unready state */ }
     try {
       const session = await api('/api/session');
-      state.wallet = session.wallet;
+      state.sessionEpoch++; state.wallet = session.wallet;
       if (!$('report-wallet').value.trim()) $('report-wallet').value = session.wallet;
       await loadTasks();
     } catch (error) { if (error.status !== 401) notice(error.code); }

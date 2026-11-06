@@ -9,6 +9,7 @@ RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && npm cache clean --force
 COPY --chown=node:node service ./service
 COPY --chown=node:node reference/ai_baseline ./reference/ai_baseline
+COPY --chown=node:node scripts/container-smoke.mjs ./scripts/container-smoke.mjs
 USER node
 ENV NODE_ENV=production \
     PYTHONDONTWRITEBYTECODE=1 \

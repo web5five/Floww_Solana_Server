@@ -5,7 +5,9 @@ Backend, AI orchestration, authorization policies and Solana x402 integration.
 
 The `service/` runtime adds signed wallet login, private persistent tasks, exact
 Devnet purchase approvals, official x402/SVM transport, RPC transfer reports and
-a responsive browser workspace. It builds on the AI reference below; it does
+a persistent browser workspace with conversations, separately reviewed plans,
+explicit preference memory, scoped mandates, aggregate budget reservations,
+owner-only dashboards and paginated task/report history. It builds on the AI reference below; it does
 not replace the legacy EVM services or assert a shared team API agreement.
 
 ```sh
@@ -31,7 +33,9 @@ existing non-root PostgreSQL binaries. Runtime tests use scripted transports and
 real loopback HTTP/process/DB behavior; they do not prove external settlement.
 Actual model calls, wallet acceptance and cloud deployment remain distinct.
 
-See the [API contract](docs/integration/API.md), [payment transport](docs/integration/X402.md),
+See the [workspace guide](docs/production/WORKSPACE.md),
+[planner roles](docs/production/PLANNER.md), [budget ledger](docs/production/MANDATES.md),
+[API contract](docs/integration/API.md), [payment transport](docs/integration/X402.md),
 [report/AI integration](docs/integration/PROVIDER_AI.md),
 [deployment setup](docs/integration/DEPLOYMENT.md) and
 [verification record](docs/integration/VERIFICATION.md).

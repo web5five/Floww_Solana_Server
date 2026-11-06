@@ -1,6 +1,7 @@
 import pg from 'pg';
 import { createHash, randomBytes, randomUUID, X509Certificate } from 'node:crypto';
 import { ServiceError, fail } from './config.mjs';
+import { archiveCheck, idempotencyOptions, immutableContext, nextCursor, pageOptions, taskDashboard, taskSummary } from './store.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 const token = () => randomBytes(32).toString('base64url');
@@ -87,8 +88,13 @@ export class PostgresStore {
             data JSONB NOT NULL, created BIGINT NOT NULL);
           CREATE TABLE IF NOT EXISTS floww_runtime.merchant_receipts (
             key TEXT PRIMARY KEY, state TEXT NOT NULL CHECK(state IN ('PENDING','COMPLETED')), data JSONB);
+          ALTER TABLE floww_runtime.tasks ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT FALSE;
+          CREATE TABLE IF NOT EXISTS floww_runtime.task_idempotency (
+            owner TEXT NOT NULL, request_key TEXT NOT NULL, body_hash TEXT NOT NULL,
+            task_id TEXT NOT NULL REFERENCES floww_runtime.tasks(id), PRIMARY KEY(owner,request_key));
           CREATE INDEX IF NOT EXISTS challenge_wallet_created ON floww_runtime.challenges(wallet,created);
-          CREATE INDEX IF NOT EXISTS task_owner_created ON floww_runtime.tasks(owner,created DESC);`);
+          CREATE INDEX IF NOT EXISTS task_owner_created ON floww_runtime.tasks(owner,created DESC);
+          CREATE INDEX IF NOT EXISTS task_owner_page ON floww_runtime.tasks(owner,archived,created DESC,id DESC);`);
       });
       return store;
     } catch (error) {
@@ -176,15 +182,28 @@ export class PostgresStore {
     if (typeof value === 'string') await this.query('DELETE FROM floww_runtime.sessions WHERE hash=$1', [hash(value)]);
   }
 
-  async add(task) {
+  async add(task, options) {
+    const request = idempotencyOptions(options);
     let copy;
-    try { task.revision = 1; copy = structuredClone(task); } catch { fail('STATE_UNAVAILABLE', 503); }
+    try { task.revision = 1; task.archivedAt = null; task.createdAt ??= new Date(this.clock()).toISOString(); copy = structuredClone(task); }
+    catch { fail('STATE_UNAVAILABLE', 503); }
     return this.transaction(async client => {
       await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))', ['floww_runtime.task-limit:' + copy.owner]);
-      const counts = await client.query('SELECT count(*) AS n FROM floww_runtime.tasks WHERE owner=$1', [copy.owner]);
+      if (request) {
+        const replay = await client.query('SELECT body_hash,task_id FROM floww_runtime.task_idempotency WHERE owner=$1 AND request_key=$2', [copy.owner, request.key]);
+        if (replay.rows.length) {
+          if (replay.rows[0].body_hash !== request.hash) fail('IDEMPOTENCY_CONFLICT', 409);
+          const saved = await this.row(client, replay.rows[0].task_id, copy.owner);
+          if (this.normalize(saved)) await this.save(client, saved, saved.id, copy.owner);
+          return saved;
+        }
+      }
+      const counts = await client.query('SELECT count(*) AS n FROM floww_runtime.tasks WHERE owner=$1 AND archived=FALSE', [copy.owner]);
       if (Number(counts.rows[0].n) >= 100) fail('TASK_LIMIT_REACHED', 429);
       await client.query('INSERT INTO floww_runtime.tasks(id,owner,revision,data,created) VALUES($1,$2,$3,$4::jsonb,$5)',
-        [copy.id, copy.owner, copy.revision, JSON.stringify(copy), this.clock()]);
+        [copy.id, copy.owner, copy.revision, JSON.stringify(copy), Date.parse(copy.createdAt)]);
+      if (request) await client.query('INSERT INTO floww_runtime.task_idempotency(owner,request_key,body_hash,task_id) VALUES($1,$2,$3,$4)',
+        [copy.owner, request.key, request.hash, copy.id]);
       return copy;
     });
   }
@@ -208,8 +227,8 @@ export class PostgresStore {
   async save(client, task, id, owner) {
     if (task.id !== id || task.owner !== owner) fail('TASK_IDENTITY_CHANGED', 500);
     task.revision++;
-    await client.query('UPDATE floww_runtime.tasks SET revision=$1,data=$2::jsonb WHERE id=$3 AND owner=$4',
-      [task.revision, JSON.stringify(task), id, owner]);
+    await client.query('UPDATE floww_runtime.tasks SET revision=$1,data=$2::jsonb,archived=$5 WHERE id=$3 AND owner=$4',
+      [task.revision, JSON.stringify(task), id, owner, Boolean(task.archivedAt)]);
     return task;
   }
 
@@ -237,11 +256,50 @@ export class PostgresStore {
     });
   }
 
+  async page(owner, options) {
+    const { limit, after, includeArchived } = pageOptions(owner, options), args = [owner], clauses = ['owner=$1'];
+    if (!includeArchived) clauses.push('archived=FALSE');
+    if (after) { args.push(after.created, after.id); clauses.push(`(created<$2 OR (created=$2 AND id<$3))`); }
+    args.push(limit + 1);
+    const result = await this.query(`SELECT id,created,
+      data-ARRAY['result','signedData','quoteData','aiSnapshot','deliveredBody','operation','events','approval','proposal','quote']::text[] AS data,
+      (data->'result'->'answer' IS NOT NULL AND data->'result'->'answer'<>'null'::jsonb) AS result_available
+      FROM floww_runtime.tasks WHERE ${clauses.join(' AND ')} ORDER BY created DESC,id DESC LIMIT $${args.length}`, args);
+    return { tasks: result.rows.slice(0, limit).map(row => ({ ...taskSummary(row.data), resultAvailable: row.result_available })),
+      nextCursor: result.rows.length > limit ? nextCursor(owner, includeArchived, result.rows[limit - 1]) : null };
+  }
+
+  async dashboard(owner) {
+    const rows = await this.query(`SELECT archived,data->>'payment' AS payment,data->>'delivery' AS delivery,
+      (data->'result'->'answer' IS NOT NULL AND data->'result'->'answer'<>'null'::jsonb) AS result_available,
+      count(*) AS n FROM floww_runtime.tasks WHERE owner=$1 GROUP BY archived,payment,delivery,result_available`, [owner]);
+    return taskDashboard(rows.rows);
+  }
+
+  async archive(id, owner) {
+    return this.mutate(id, owner, task => { archiveCheck(task); task.archivedAt ??= new Date(this.clock()).toISOString(); });
+  }
+
+  async restore(id, owner) {
+    return this.transaction(async client => {
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))', ['floww_runtime.task-limit:' + owner]);
+      const task = await this.row(client, id, owner);
+      if (task.archivedAt) {
+        const count = await client.query('SELECT count(*) AS n FROM floww_runtime.tasks WHERE owner=$1 AND archived=FALSE', [owner]);
+        if (Number(count.rows[0].n) >= 100) fail('TASK_LIMIT_REACHED', 429);
+      }
+      task.archivedAt = null;
+      return this.save(client, task, id, owner);
+    });
+  }
+
   async mutate(id, owner, fn) {
     return this.transaction(async client => {
       const task = await this.row(client, id, owner);
       this.normalize(task);
+      const context = immutableContext(task);
       rejectAsync(fn(task));
+      if (immutableContext(task) !== context) fail('TASK_IDENTITY_CHANGED', 500);
       return this.save(client, task, id, owner);
     });
   }

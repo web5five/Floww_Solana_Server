@@ -50,3 +50,24 @@ test('invalid scopes and authority injection are rejected; private fields exclud
   const snapshot = JSON.stringify(publicTask(t));
   for (const value of ['private-proof', 'private-body', 'aiSnapshot', 'quoteData', 'signedData', 'operation']) assert.ok(!snapshot.includes(value));
 });
+
+test('server workspace context binds the quote and cannot be inserted through client task input', () => {
+  const f = fixture();
+  const body = { purpose: f.t.purpose, wallet: f.t.wallet, windowStart: f.t.windowStart, windowEnd: f.t.windowEnd };
+  const context = { conversationId: 'conversation-1', planHash: 'a'.repeat(64), intentRevision: 2,
+    resourceId: 'wallet-transfers', mandateId: 'mandate-1', mandateVersion: 1 };
+  assert.throws(() => makeTask({ ...body, workspaceContext: context }, f.t.owner, now), /INVALID_REQUEST/);
+  for (const invalid of [{ ...context, intentRevision: 0 }, { ...context, planHash: 'fake' },
+    { ...context, mandateVersion: null }, { ...context, arbitraryAuthority: true }]) {
+    assert.throws(() => makeTask(body, f.t.owner, now, invalid), /INVALID_WORKSPACE_CONTEXT|INVALID_REQUEST/);
+  }
+  const task = makeTask(body, f.t.owner, now, context); task.id = f.t.id;
+  attachQuote(task, f.q, f.cfg, f.payer, now); task.proposal = { ref: 'workspace-proposal' };
+  assert.notEqual(task.quote.hash, f.t.quote.hash);
+  const approval = { ...f.body, quoteHash: task.quote.hash };
+  approve(task, approval, f.cfg, f.payer, now); assertApproval(task, f.cfg, f.payer, now + 1);
+  task.workspaceContext.intentRevision++;
+  assert.throws(() => assertApproval(task, f.cfg, f.payer, now + 1), /QUOTE_CHANGED/);
+  assert.throws(() => approve(task, approval, f.cfg, f.payer, now), /QUOTE_CHANGED/);
+  assert.deepEqual(publicTask(task).workspaceContext, task.workspaceContext);
+});

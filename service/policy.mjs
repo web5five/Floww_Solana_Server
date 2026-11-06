@@ -19,7 +19,20 @@ function time(value) {
   if (result.slice(0, 19) !== value.slice(0, 19)) fail('INVALID_TIME');
   return result;
 }
-export function makeTask(body, owner, now = Date.now()) {
+function workspaceMetadata(value) {
+  if (value === undefined) return undefined;
+  exact(value, ['conversationId', 'planHash', 'intentRevision', 'resourceId', 'mandateId', 'mandateVersion']);
+  const identifier = input => typeof input === 'string' && /^[A-Za-z0-9._:/-]{1,160}$/.test(input);
+  const noMandate = (value.mandateId === undefined || value.mandateId === null) &&
+    (value.mandateVersion === undefined || value.mandateVersion === null);
+  const validMandate = identifier(value.mandateId) && Number.isSafeInteger(value.mandateVersion) && value.mandateVersion >= 1;
+  if (!identifier(value.conversationId) || !identifier(value.resourceId) ||
+      typeof value.planHash !== 'string' || !/^[a-f0-9]{64}$/.test(value.planHash) ||
+      !Number.isSafeInteger(value.intentRevision) || value.intentRevision < 1 || (!noMandate && !validMandate)) fail('INVALID_WORKSPACE_CONTEXT');
+  return { conversationId: value.conversationId, planHash: value.planHash, intentRevision: value.intentRevision,
+    resourceId: value.resourceId, mandateId: value.mandateId ?? null, mandateVersion: value.mandateVersion ?? null };
+}
+export function makeTask(body, owner, now = Date.now(), workspaceContext) {
   exact(body, ['purpose', 'wallet', 'windowStart', 'windowEnd']);
   if (typeof body.purpose !== 'string' || !body.purpose.trim() || body.purpose.length > 2_000 ||
       /[\x00-\x08\x0b-\x1f\x7f]/.test(body.purpose) || !isAddress(body.wallet)) fail('INVALID_TASK');
@@ -32,7 +45,8 @@ export function makeTask(body, owner, now = Date.now()) {
     createdAt: new Date(now).toISOString(), policy: 'PENDING', payment: 'NOT_STARTED',
     delivery: 'NOT_STARTED', quote: null, approval: null, proposal: null, result: null,
     transaction: null, events: [], reasonCode: 'QUOTE_REQUIRED', nextAction: 'QUOTE',
-    operation: null,
+    operation: null, archivedAt: null,
+    ...(workspaceContext === undefined ? {} : { workspaceContext: workspaceMetadata(workspaceContext) }),
   };
 }
 export function resourceUrl(task, config) {
@@ -51,10 +65,14 @@ export function validateQuote(quote, expectedUrl, config) {
       !isAddress(r.extra?.feePayer)) fail('UNAPPROVED_PAYMENT_TERMS', 409);
   return quote;
 }
+function quoteHash(task, quoteData, payer, expiresAt) {
+  return digest(canonical({ terms: termsHash(quoteData), taskId: task.id,
+    wallet: task.wallet, windowStart: task.windowStart, windowEnd: task.windowEnd, payer, expiresAt,
+    ...(task.workspaceContext === undefined ? {} : { workspaceContext: workspaceMetadata(task.workspaceContext) }) }));
+}
 export function attachQuote(task, quoteData, config, payer, now) {
   const expiresAt = new Date(now + config.quoteTtlMs).toISOString();
-  const hash = digest(canonical({ terms: termsHash(quoteData), taskId: task.id,
-    wallet: task.wallet, windowStart: task.windowStart, windowEnd: task.windowEnd, payer, expiresAt }));
+  const hash = quoteHash(task, quoteData, payer, expiresAt);
   task.quoteData = quoteData;
   task.quote = { hash, amountAtomic: quoteData.requirements.amount, asset: quoteData.requirements.asset,
     assetDecimals: config.assetDecimals, network: config.network, recipient: quoteData.requirements.payTo,
@@ -76,9 +94,11 @@ export function attachQuote(task, quoteData, config, payer, now) {
 }
 export function approve(task, body, config, payer, now) {
   exact(body, ['quoteHash', 'budgetAtomic', 'expiresAt', 'acknowledge', 'allowedRecipient', 'asset', 'network']);
+  if (task.archivedAt) fail('TASK_ARCHIVED', 409);
   if (task.payment !== 'NOT_STARTED' || task.signedData || task.attemptRef || task.operation) fail('EXECUTION_ALREADY_CLAIMED', 409);
   if (!task.quote || !task.proposal || task.quote.hash !== body.quoteHash) fail('QUOTE_REQUIRED', 409);
   if (task.quote.payer !== payer || !isAddress(payer)) fail('PAYER_CHANGED', 409);
+  if (task.quote.hash !== quoteHash(task, task.quoteData, payer, task.quote.expiresAt)) fail('QUOTE_CHANGED', 409);
   if (body.acknowledge !== true) fail('EXPLICIT_APPROVAL_REQUIRED');
   if ((body.allowedRecipient !== undefined && body.allowedRecipient !== task.quote.recipient) ||
       (body.asset !== undefined && body.asset !== task.quote.asset) ||
@@ -94,9 +114,11 @@ export function approve(task, body, config, payer, now) {
 }
 export function assertApproval(task, config, payer, now) {
   const a = task.approval, q = task.quote;
+  if (task.archivedAt) fail('TASK_ARCHIVED', 409);
   if (!a || !q || a.revoked || task.policy !== 'ALLOW' || a.quoteHash !== q.hash) fail('APPROVAL_REQUIRED', 403);
   if (Date.parse(a.expiresAt) <= now || Date.parse(q.expiresAt) <= now) fail('APPROVAL_EXPIRED', 403);
   if (a.payer !== payer || q.payer !== payer || !isAddress(payer)) fail('PAYER_CHANGED', 403);
+  if (q.hash !== quoteHash(task, task.quoteData, payer, q.expiresAt)) fail('QUOTE_CHANGED', 409);
   if (atomic(a.budgetAtomic) < atomic(q.amountAtomic) || atomic(q.amountAtomic) > atomic(config.maxPaymentAtomic)) fail('BUDGET_DENIED', 403);
   validateQuote(task.quoteData, resourceUrl(task, config), config);
 }
@@ -107,5 +129,5 @@ export function signature(value) {
 export function publicTask(task) {
   return Object.fromEntries(['id', 'revision', 'purpose', 'wallet', 'windowStart', 'windowEnd', 'createdAt',
     'policy', 'payment', 'delivery', 'quote', 'approval', 'proposal', 'transaction', 'events',
-    'result', 'reasonCode', 'nextAction'].map(key => [key, task[key] ?? null]));
+    'result', 'reasonCode', 'nextAction', 'archivedAt', 'workspaceContext'].map(key => [key, task[key] ?? null]));
 }

@@ -6,10 +6,11 @@ services:
     runtime: docker
     plan: free
     region: singapore
-    branch: feature/solana-x402-integration
+    branch: main
     autoDeployTrigger: 'off'
     dockerfilePath: ./Dockerfile
     dockerContext: .
+    healthCheckPath: /api/health
     envVars:
       - key: FLOWW_DEPLOYMENT_MODE
         value: remote

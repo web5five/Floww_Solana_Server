@@ -8,6 +8,10 @@ import { createRpc } from './network.mjs';
 import { createGateway, mountMerchant } from './x402.mjs';
 import { createReportProvider } from './provider.mjs';
 import { createAiBridge } from './ai.mjs';
+import { createPlanner } from './planner.mjs';
+import { WorkspaceStore } from './workspace-store.mjs';
+import { mountWorkspace } from './workspace.mjs';
+import { createMandateService } from './mandates.mjs';
 
 export function readPayerKey(path) {
   let fd;
@@ -38,8 +42,19 @@ export async function buildRuntime(input = {}) {
   const gateway = input.gateway ?? createGateway(config, { rpc });
   const reportProvider = input.reportProvider ?? createReportProvider({ rpc });
   const ai = input.ai ?? createAiBridge({ python: config.python, model: config.model ?? undefined, apiKey: config.apiKey ?? undefined });
-  const app = createApp({ config, store, gateway, reportProvider, ai, mountMerchant: input.mountMerchant ?? mountMerchant });
-  return { app, config, store, gateway, reportProvider, ai };
+  const planner = input.planner ?? createPlanner({ python: config.python, model: config.model, apiKey: config.apiKey });
+  const workspace = await WorkspaceStore.open(store);
+  const mandates = await createMandateService({ store, config });
+  const app = createApp({ config, store, gateway, reportProvider, ai, mountMerchant: input.mountMerchant ?? mountMerchant,
+    mountWorkspace: (app, context) => mountWorkspace(app, { repo: workspace, planner, mandates }, context),
+    runtimeReadiness: () => mandates.readiness(),
+    taskHooks: {
+      beforeClaim: ({ task, owner }) => mandates.reserve(owner, task),
+      beforeSign: ({ task, owner }) => mandates.assertReservation(owner, task),
+      observed: ({ task, owner }) => mandates.observe(owner, task),
+    },
+  });
+  return { app, config, store, gateway, reportProvider, ai, planner, workspace, mandates };
 }
 export async function start(input = {}) {
   const runtime = await buildRuntime(input);

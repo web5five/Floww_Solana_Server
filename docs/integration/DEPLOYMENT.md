@@ -2,7 +2,9 @@
 
 This checkout provides one Node service and a Python standard-library subprocess.
 `Dockerfile` prepares both runtimes, runs as the `node` user and installs only
-the pinned production packages. The image has not yet been built or deployed.
+the pinned production packages. The runtime CI builds this image and runs its
+non-root smoke checks against the exact PR source; this is separate from a
+public Render deployment.
 
 ## Destination and account setup
 
@@ -24,10 +26,11 @@ do not pause an existing project or upgrade a paid tier to bypass them.
 ## Runtime configuration
 
 Use `render.yaml` as the creation template after source review and tests. It
-disables automatic deploys, selects the feature branch and keeps payments off.
-Select the verified commit explicitly for a release; update the configured
-branch if the integration is later merged. The default Render TCP probe only
-proves that the process accepts connections, not payment or model readiness.
+disables automatic deploys, selects `main` and keeps payments off. Select the
+verified commit explicitly for a release. The HTTP probe uses `/api/health`;
+HTTP 200 establishes that the process serves the route. Read `ready`,
+`databaseReady` and `missing` separately for payment configuration and the
+pre-ledger import guard. A probe does not establish model quality or settlement.
 
 | Setting | Value or source |
 | --- | --- |
@@ -83,8 +86,12 @@ code to the recorded previous working deployment if necessary; preserve durable
 state and UNKNOWN payment proofs. Never clear a pending purchase or re-sign it
 to make a health indicator green.
 
-The API key currently being prepared is user-owned, restricted to Responses and
-expires after seven days. Key configuration alone does not execute a model:
-the explicit resource-selection path remains deterministic and labels its
-execution kind accordingly. Record a real bounded model call separately if it
-is run. No live key, DB or deployment claim is made by this document.
+The configured user-owned Responses key expires on November 13, 2026. The
+conversation refiner and planner/critic use the explicitly selected server model;
+manual resource selection still uses its deterministic path. Model processes
+receive no database, session, payer or signing credentials. Call-slot quotas are
+persisted globally and per owner; see [.env.example](../../.env.example).
+
+The [workspace verification checkpoint](../production/VERIFICATION.md) separates
+actual bounded model/managed-DB/browser results from isolated test fixtures,
+Phantom user acceptance, funded Devnet settlement and public-cloud deployment.
