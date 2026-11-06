@@ -240,6 +240,60 @@ binding remain in the local GWDC evidence directory. Whole-document BFCache
 restoration is a separate unverified lifecycle boundary, as tracked in
 [READINESS.md](READINESS.md).
 
+## Cached adapter preflight and degraded experience — 2026-11-07
+
+- Full local Node suite: **406 passed, zero failed/skipped**, with required
+  isolated PostgreSQL checks enabled. Python: **209 passed**. The 24 new backend
+  cases cover subprocess packaging and actual HTTP/SQLite integration; the UI
+  set is now **138 cases**, including21 new capability/owner/route regressions.
+  Source/NFC checks cover74 files; workflow lint and Git whitespace checks pass.
+- Each default runtime starts one credential-free offline process to import
+  the actual workspace and report modules independently and check their
+  callable entry points. It does not invoke those functions. A two-second whole
+  deadline, combined1KiB output limit, strict boolean protocol, cancellation and
+  inherited-pipe cleanup have real subprocess acceptance. A counted executable
+  runs once across repeated health/liveness/readiness and no-key planner calls.
+- Immutable capability snapshots require exact own boolean fields. Production
+  always checks packaging, even without a model key; only explicit programmatic
+  injection identifies trusted test adapters. Direct application callers do not
+  silently default to healthy capabilities. Public health fields remain local
+  packaging facts; `modelConfigured` remains configuration, not provider health.
+- Known workspace failure stops a new turn or plan before message/request
+  mutation or model quota. Existing accepted request replay and private reads
+  remain available. Workspace-only failure does not disable the independently
+  usable manual Task/payment path. Known report failure blocks new quote,
+  approval and signing before Task mutation or financial reservation.
+- A previously UNKNOWN proof remains claimed, with its held budget and original
+  reconciliation path. Recovery can persist confirmed settlement/delivery and
+  spend observations without optional report processing. Tests preserve the
+  original proof, prevent another signature and retain durable facts through
+  logout while refusing result publication to the expired session. Financial
+  and model ports in these HTTP/auth/SQLite cases are explicitly scripted.
+- An actual missing-executable runtime serves the page, `/livez` and DB/ledger
+  `/readyz` with200. Health returns both capabilities false and financial
+  readiness false; private Task/conversation requests return401. This runtime
+  uses SQLite and inert model configuration only. The actual local managed-DB
+  preview separately returns both capabilities true, DB/ledger readiness200
+  and private401s, with payments disabled. Neither check calls a model provider.
+- Native desktop/390px KO/EN readback preserves an editable guest draft across
+  language changes and same-document Back, displays a useful unavailable
+  explanation and keeps explicit login accessible. Unknown/malformed readiness
+  disables new model/purchase work. Saved reports, original reconciliation and
+  recovery, exact consent values and stale-owner/route fences have regressions.
+- A separate read-only display fixture shows confirmed payment/delivery without
+  an answer. Journey, Task guidance and result area explain the processing stop
+  and keep original recovery available. Loading that stored Task now announces
+  its current state instead of claiming the work completed. Its recorded17 GET
+  requests and zero non-GET requests are display evidence, not real identity,
+  settlement or delivery. Screenshots and HTTP records remain local. Temporary
+  fixture tabs/processes were closed; the empty actual preview was retained.
+
+The container gate now runs the actual non-root image with a read-only root
+filesystem, a bounded temporary filesystem and external networking disabled. It
+asserts both capabilities through default startup instead of running a second
+independent import probe. Its passing result must still be read from exact-source
+CI; no local host test is described as container acceptance.
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

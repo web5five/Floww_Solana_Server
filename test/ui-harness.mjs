@@ -164,7 +164,11 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
   return { document, window, nodes, calls, intervals, events, backgroundErrors, get: id => ids.get(id),
     storage, storageWrites, downloads, historyEntries, historyWrites,
     emit(type, detail) { window.dispatchEvent(new Event(type, { detail })); },
-    session(wallet, health = { ready: false }) { window.dispatchEvent(new Event('floww:session', { detail: { wallet, health } })); },
+    // Existing healthy scripted fixtures explicitly supply their local adapter
+    // capabilities. Unknown/malformed health tests use real /api/health payloads
+    // or emit the exact session event, without this convenience default.
+    session(wallet, health = { ready: false }) { window.dispatchEvent(new Event('floww:session', { detail: { wallet,
+      health: { workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ...health } } })); },
     nav(name) { return nodes.find(node => node.dataset.view === name).trigger('click'); } };
 }
 

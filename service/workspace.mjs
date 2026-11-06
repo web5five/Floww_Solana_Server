@@ -36,7 +36,7 @@ const recordView = (record, { before, at = Date.now() } = {}) => {
 
 /** No signing capability is provided to the conversational/remembered context. */
 export function mountWorkspace(app, { repo, planner, mandates }, context) {
-  const { config, store, auth, assertSession, now, respondTask, makeTask } = context;
+  const { config, store, auth, assertSession, now, respondTask, makeTask, adapterStatus } = context;
   const view = (record, options) => recordView(record, { at: now(), ...options });
   const ownerOf = async req => (await auth(req)).wallet;
   const send = async (req, res, owner, value, status = 200) => {
@@ -77,6 +77,7 @@ export function mountWorkspace(app, { repo, planner, mandates }, context) {
       if (previous.hash !== hash) fail('IDEMPOTENCY_CONFLICT', 409);
       return { replay: original };
     }
+    if (adapterStatus?.workspaceAdapterReady !== true) fail('WORKSPACE_ADAPTER_UNAVAILABLE', 503);
     if (body.expectedRevision !== original.revision) fail('WORKSPACE_CHANGED', 409);
     await ensureNotLinked(owner, original);
     if (original.data.operation?.expiresAt > now()) fail('CONVERSATION_BUSY', 409);

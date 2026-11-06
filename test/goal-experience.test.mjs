@@ -57,7 +57,7 @@ test('goal-first document has balanced structural tags and one movable execution
 test('guest draft remains editable during session bootstrap but cannot start login before readiness', async () => {
   const restoring = deferred(); let requested = false;
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') { requested = true; return restoring.promise; }
     throw new Error('Unexpected request before authentication: ' + call.url);
   });
@@ -81,7 +81,7 @@ test('guest draft remains editable during session bootstrap but cannot start log
 test('guest draft sends no protected requests and resumes exactly once after explicit successful login', async () => {
   const verifying = deferred(); let owner = null, verifyStarted = false, message, current = initialConversation();
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false, merchantConfigured: true });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false, merchantConfigured: true });
     if (call.url === '/api/session') return response({ error: { code: 'AUTHENTICATION_REQUIRED' } }, 401);
     if (call.url === '/api/auth/challenge') return response({ challengeId: 'scripted', message: 'Scripted local login' });
     if (call.url === '/api/auth/verify') { verifyStarted = true; return verifying.promise; }
@@ -112,7 +112,7 @@ test('guest draft sends no protected requests and resumes exactly once after exp
 test('cancelled explicit login keeps the guest draft and never retries login or a model by itself', async () => {
   let owner = null, current = initialConversation();
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ error: { code: 'AUTHENTICATION_REQUIRED' } }, 401);
     if (call.url === '/api/auth/challenge') return response({ challengeId: 'scripted', message: 'Scripted local login' });
     if (call.url === '/api/auth/verify') { owner = A; return response({ wallet: A }); }
@@ -268,7 +268,7 @@ async function financialFixture({ ready = true, expired = false, policy = 'PENDI
   let value = quotedTask({ expired, policy });
   const linked = { ...conversation(CONVERSATION_A, A), linkedTaskId: TASK_A, planLocked: true };
   const h = harness(fullClient, async call => {
-    if (call.url === '/api/health') return response({ ready, merchantConfigured: true, payer: B });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready, merchantConfigured: true, payer: B });
     if (call.url === '/api/session') return response({ wallet: A });
     if (call.url === '/api/tasks/' + TASK_A) return response(value);
     if (call.url === '/api/tasks/' + TASK_B) return response(task(TASK_B, 'Other requested analysis'));
@@ -293,7 +293,7 @@ async function financialFixture({ ready = true, expired = false, policy = 'PENDI
 test('confirming the visible plan prepares one quote inline without any financial approval', async () => {
   const plan = conversation(CONVERSATION_A, A); let linked = false, value = task(TASK_A, plan.title);
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false, merchantConfigured: true });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false, merchantConfigured: true });
     if (call.url === '/api/session') return response({ wallet: A });
     if (call.url.startsWith('/api/conversations?')) return response({ items: [{ id: plan.id,
       data: { title: plan.title, status: plan.status }, updatedAt: plan.messages[0].at }], nextCursor: null });

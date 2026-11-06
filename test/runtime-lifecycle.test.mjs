@@ -41,6 +41,7 @@ async function healthFixture({ lifecycle, observeRequest, mountMerchant } = {}) 
   const store = { clock: Date.now, list: async () => { control.probes++; if (!control.database) throw new Error('private-database-value'); return []; },
     session: async () => null, challenge: async () => { control.challenges++; return {}; } };
   const app = createApp({ config, store, lifecycle, observeRequest, mountMerchant,
+    adapterStatus: { workspaceAdapterReady: true, reportAdapterReady: true },
     gateway: { readiness: async () => { control.gatewayReads++; return { ready: false, missing: ['payment_enabled'], payer: null }; } },
     runtimeReadiness: async () => ({ ready: control.ledger, reasonCode: control.reasonCode }) });
   const server = createServer(app); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -217,6 +218,7 @@ async function financialFixture({ graceMs = 200, storeCloseMs = 100 } = {}) {
     reconcile: forbidden,
   };
   const runtime = await start({ config, store, gateway, rpc: forbidden, reportProvider: forbidden,
+    adapterStatus: { workspaceAdapterReady: true, reportAdapterReady: true },
     planner: {}, ai: { propose: async () => ({ status: 'PROPOSED', proposal_ref: 'fixture-proposal' }), consume: forbidden },
     mountMerchant: () => ({}), writeLog: () => true, shutdownGraceMs: graceMs, storeCloseMs });
   const http = (path, options) => request(runtime.server, config, path, options);

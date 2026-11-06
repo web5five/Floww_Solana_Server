@@ -23,7 +23,7 @@ async function boot({ hash = '', linked = true, result = false, owner = A, trans
   const control = { ca, cb, ta, tb, owner, transport, model: null, plan: null, confirm: null };
   const h = harness(source, call => {
     const custom = control.transport?.(call, control); if (custom !== undefined) return custom;
-    if (call.url === '/api/health') return response({ ready: true, merchantConfigured: true });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: true, merchantConfigured: true });
     if (call.url === '/api/session') return control.owner ? response({ wallet: control.owner }) : response({ error: { code: 'AUTHENTICATION_REQUIRED' } }, 401);
     if (call.url === '/api/auth/logout') { control.owner = null; return response(null, 204); }
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [control.tb, control.ta].map(({ result: _, ...summary }) => summary), nextCursor: null });

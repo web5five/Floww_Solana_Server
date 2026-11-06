@@ -15,6 +15,8 @@
     PAYMENT_SUBMITTED: authored('결제 요청 전달'), PAYMENT_OBSERVED: authored('결제·자료 상태 확인'), PAYMENT_RECONCILED: authored('원래 거래 상태 재확인'),
     REPORT_READY: authored('분석 결과 준비 완료'), REPORT_REJECTED: authored('자료 검증 확인 필요'), OPERATION_STOPPED: authored('실행 상태 확인 필요'), RECOVERY_REQUIRED: authored('이전 실행 상태 재확인 필요') };
   const errors = {
+    WORKSPACE_ADAPTER_UNAVAILABLE: authored('adapter.workspaceUnavailable'), REPORT_ADAPTER_UNAVAILABLE: authored('adapter.reportUnavailable'),
+    REPORT_READINESS_UNKNOWN: authored('adapter.reportUnknown'),
     UNAUTHORIZED_PAYMENT_TERMS: authored("수신자·토큰·네트워크가 승인할 결제 조건과 일치하지 않습니다. 현재 조건을 다시 확인한 뒤 승인하세요. 결제는 시작하지 않았습니다."),
     DAILY_BUDGET_EXCEEDED: authored("서버의 일일 결제 예산 한도에 도달했습니다. 원래 작업의 상태를 확인하고 한도가 이용 가능할 때 다시 진행하세요. 새 결제를 반복하지 마세요."),
     AUTHENTICATION_REQUIRED: authored('로그인이 필요합니다. 지갑을 다시 연결해 주세요.'),
@@ -51,6 +53,7 @@
   const active = () => state.tasks.find(task => task.id === state.activeId) ?? null;
   const short = (value, count = 6) => typeof value === 'string' && value.length > count * 2 + 3 ? value.slice(0, count) + '…' + value.slice(-count) : value || authored('설정 대기');
   const dateText = value => locale.date(value);
+  function reportBlock() { return state.health?.reportAdapterReady === true ? null : state.health?.reportAdapterReady === false ? 'REPORT_ADAPTER_UNAVAILABLE' : 'REPORT_READINESS_UNKNOWN'; }
   const localDate = value => {
     const date = new Date(value);
     return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 19);
@@ -127,6 +130,7 @@
     $('window-end').value = localDate(Date.now() - 1000); $('window-start').value = localDate(Date.now() - 86_400_000);
     clearNotice();
     for (const id of ['result-content', 'timeline', 'quote-details']) $(id).replaceChildren();
+    put($('result-empty').querySelector('p'), () => authored('자료 전달이 확인되면') + ' ' + authored('분석 결과가 여기에 나타납니다.'));
     for (const id of ['task-meta', 'quote-price', 'quote-atomic', 'quote-parties', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) put($(id), () => '');
     put($('execution-title'), () => authored('선택한 요청')); $('transaction-link').removeAttribute('href');
   }
@@ -141,9 +145,14 @@
     const token = {};
     clearNotice(); state.busy = true; state.busyOperation = operation; state.busyToken = token;
     render();
-    try { await action(); if (state.busyToken === token) announce(authored('작업을 완료했습니다.')); }
+    try {
+      await action();
+      if (state.busyToken === token) announce(authored(['task.load', 'task.refresh'].includes(state.busyOperation) ? 'adapter.requestLoaded'
+        : ['task.list', 'task.earlier', 'task.archiveList'].includes(state.busyOperation) ? 'adapter.tasksLoaded' : '작업을 완료했습니다.'));
+    }
     catch (error) {
       if (error?.stale || state.busyToken !== token) return;
+      if (error?.code === 'REPORT_ADAPTER_UNAVAILABLE') { state.health = { ...state.health, reportAdapterReady: false, ready: false }; emitSession(); }
       if (error?.status === 401) clearSession();
       notice(error?.code);
     } finally {
@@ -173,11 +182,12 @@
   function guidance(task) {
     if (task.result?.answer) return authored('자료와 거래 근거를 확인했습니다. 아래에서 자산별 이체 결과를 살펴보세요.');
     if (task.payment === 'UNKNOWN') return authored('결제 결과가 아직 확정되지 않았습니다. 새 결제를 만들지 않고 원래 거래의 상태를 확인합니다.');
-    if (task.payment === 'CONFIRMED' && task.delivery !== 'COMPLETED') return authored('결제는 확인됐습니다. 같은 결제를 사용해 자료 전달을 다시 확인할 수 있습니다.');
-    if (task.payment === 'CONFIRMED') return authored('자료가 전달됐습니다. 내용 검증과 분석 결과의 상태를 확인해 주세요.');
+    if (task.payment === 'CONFIRMED' && task.delivery !== 'COMPLETED') return () => authored('결제는 확인됐습니다. 같은 결제를 사용해 자료 전달을 다시 확인할 수 있습니다.') + (reportBlock() ? ' ' + errors[reportBlock()] : '');
+    if (task.payment === 'CONFIRMED') return () => authored('자료가 전달됐습니다. 내용 검증과 분석 결과의 상태를 확인해 주세요.') + (reportBlock() ? ' ' + errors[reportBlock()] : '');
     if (task.payment === 'FAILED') return authored('거래 실패가 확인됐습니다. 실행 기록과 거래 상태를 검토해 주세요.');
     if (['SIGNING', 'PENDING'].includes(task.payment)) return authored('승인된 요청을 처리하고 있습니다. 같은 결제를 다시 실행하지 않고 상태를 확인합니다.');
     if (task.policy === 'DENY') return denialGuidance(task);
+    if (reportBlock()) return errors[reportBlock()];
     if (task.quote && !liveQuote(task)) return authored('결제 조건의 유효 시간이 지났습니다. 최신 조건을 확인한 뒤 다시 승인해 주세요.');
     if (task.policy === 'ALLOW' && liveApproval(task)) return authored('승인한 조건으로 실행할 준비가 됐습니다. 아래 실행 버튼을 누르면 Devnet 결제가 시작됩니다.');
     if (task.quote) return authored('수신자와 토큰, 금액을 확인한 뒤 승인하고 실행해 주세요.');
@@ -186,8 +196,22 @@
 
   function renderHealth() {
     const health = state.health;
-    put($('health-status'), () => health ? health.ready ? authored('Devnet 결제 설정 준비됨') : authored('Devnet 실행 설정 준비 중') : authored('설정 상태 확인 중'));
-    put($('health-detail'), () => health ? health.ready ? authored('각 결제 직전에 승인과 네트워크를 다시 확인합니다.') : authored('요청을 보관하고, 연결 준비가 끝나면 조건을 확인할 수 있습니다.') : authored('현재 Devnet 환경을 확인하고 있습니다.'));
+    put($('health-status'), () => !health ? authored('설정 상태 확인 중') : health.reportAdapterReady === false ? authored('adapter.reportTitle')
+      : health.workspaceAdapterReady === false ? authored('adapter.workspaceTitle') : health.modelConfigured === false ? authored('adapter.configurationTitle')
+        : health.workspaceAdapterReady !== true || health.reportAdapterReady !== true || health.modelConfigured !== true ? authored('adapter.unknownTitle')
+          : health.ready ? authored('Devnet 결제 설정 준비됨') : authored('Devnet 실행 설정 준비 중'));
+    put($('health-detail'), () => {
+      if (!health) return authored('현재 연결을 확인하고 있습니다.');
+      const notes = [];
+      if (health.workspaceAdapterReady === false) notes.push(authored('adapter.workspaceUnavailable'));
+      else if (health.workspaceAdapterReady !== true || (health.modelConfigured !== true && health.modelConfigured !== false)) notes.push(authored('adapter.workspaceUnknown'));
+      if (health.modelConfigured === false) notes.push(authored('adapter.configurationHelp'));
+      if (health.reportAdapterReady === false) notes.push(authored('adapter.reportUnavailable'));
+      else if (health.reportAdapterReady !== true) notes.push(authored('adapter.reportUnknown'));
+      if (health.ready === false && health.reportAdapterReady === true) notes.push(authored('요청을 보관하고, 연결 준비가 끝나면 조건을 확인할 수 있습니다.'));
+      if (health.workspaceAdapterReady === true && health.reportAdapterReady === true) notes.push(authored('adapter.checked'));
+      return notes.map(String).join(' ');
+    });
   }
   function renderHistory() {
     put($('task-count'), () => String(state.tasks.length));
@@ -263,6 +287,10 @@
     $('result-empty').hidden = Boolean(answer);
     $('result-content').hidden = !answer;
     $('download-report').hidden = !answer || typeof task.result.markdown !== 'string' || !task.result.markdown;
+    put($('result-empty').querySelector('p'), () => reportBlock()
+      ? (task.delivery === 'COMPLETED' ? authored('adapter.deliveryConfirmed') + ' ' : '') + errors[reportBlock()]
+      : task.delivery === 'COMPLETED' ? authored('자료가 전달됐습니다. 내용 검증과 분석 결과의 상태를 확인해 주세요.')
+        : authored('자료 전달이 확인되면') + ' ' + authored('분석 결과가 여기에 나타납니다.'));
     if (!answer) { $('result-content').replaceChildren(); return; }
     const pieces = [];
     if (answer.is_synthetic) pieces.push(element('p', () => authored('이 결과는 실제 네트워크에서 조회한 자료가 아닙니다.'), 'report-notice'));
@@ -322,11 +350,11 @@
     const notStarted = untouched(task);
     $('quote-task').hidden = !notStarted;
     put($('quote-task'), () => task.quote ? authored('결제 조건 다시 확인') : authored('결제 조건 확인'));
-    $('quote-task').disabled = busy || !authenticated;
+    $('quote-task').disabled = busy || !authenticated || Boolean(reportBlock());
     $('approval-form').hidden = !notStarted || !task.quote || (task.policy === 'ALLOW' && liveApproval(task));
-    $('approve-task').disabled = busy || !authenticated || !liveQuote(task) || !state.health?.ready || !$('approval-ack').checked;
+    $('approve-task').disabled = busy || !authenticated || Boolean(reportBlock()) || !liveQuote(task) || !state.health?.ready || !$('approval-ack').checked;
     $('execute-task').hidden = !notStarted || task.policy !== 'ALLOW';
-    $('execute-task').disabled = busy || !authenticated || !exactApproval(task) || !state.health?.ready;
+    $('execute-task').disabled = busy || !authenticated || Boolean(reportBlock()) || !exactApproval(task) || !state.health?.ready;
     $('revoke-task').hidden = !notStarted || !task.approval || task.approval.revoked;
     $('revoke-task').disabled = busy || !authenticated;
     $('reconcile-task').hidden = !['UNKNOWN', 'PENDING', 'SIGNING'].includes(task.payment);
@@ -378,6 +406,7 @@
     if (state.activeId) await refreshSelected();
   }
   async function selectedAction(action, body = {}, id = state.activeId) {
+    if (['quote', 'approve', 'execute'].includes(action) && reportBlock()) throw { code: reportBlock() };
     const task = active();
     if (!task || task.id !== id) throw { code: 'TASK_CHANGED' };
     const selection = selectionSnapshot(id); let updated;
@@ -479,11 +508,17 @@
   window.addEventListener('floww:session-expired', event => { if (state.wallet && event.detail?.wallet === state.wallet) clearSession(); });
   window.addEventListener('floww:route-context', event => routeContext(event.detail));
   window.addEventListener('floww:route-change', () => { state.navigationEpoch++; });
+  window.addEventListener('floww:adapter-unavailable', event => {
+    const detail = event.detail;
+    if (!state.wallet || detail?.wallet !== state.wallet || detail.generation !== state.sessionEpoch || !['workspaceAdapterReady', 'reportAdapterReady', 'modelConfigured'].includes(detail.field)) return;
+    state.health = { ...state.health, [detail.field]: false, ...(detail.field === 'reportAdapterReady' ? { ready: false } : {}) }; render(); emitSession();
+  });
   window.addEventListener('floww:select-task', event => requestSelection(event.detail));
   $('refresh-task').addEventListener('click', () => perform('task.refresh', refreshSelected));
   $('quote-task').addEventListener('click', () => perform('task.quote', () => selectedAction('quote')));
   $('execute-task').addEventListener('click', () => perform('task.execute', async () => {
     const task = active();
+    if (reportBlock()) throw { code: reportBlock() };
     if (!exactApproval(task)) throw { code: 'APPROVAL_EXPIRED' };
     if (!state.health?.ready) throw { code: 'PAYMENT_NOT_READY' };
     await selectedAction('execute', { approvalId: task.approval.id }, task.id);
@@ -498,6 +533,7 @@
     if (!$('approval-form').reportValidity()) return;
     perform('task.approve', async () => {
       const task = active();
+      if (reportBlock()) throw { code: reportBlock() };
       if (!untouched(task)) throw { code: 'EXECUTION_ALREADY_CLAIMED' };
       if (!liveQuote(task)) throw { code: 'APPROVAL_EXPIRED' };
       if (!$('approval-ack').checked) throw { code: 'EXPLICIT_APPROVAL_REQUIRED' };

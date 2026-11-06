@@ -64,6 +64,7 @@ async function setup({ sessionTtlMs = 8 * 3600_000, ownerModelDailyLimit = 100, 
     },
   };
   server.on('request', createApp({ config, store, gateway, ai: { propose: financial, consume: financial },
+    adapterStatus: { workspaceAdapterReady: true, reportAdapterReady: true },
     mountWorkspace: (app, context) => mountWorkspace(app, { repo, planner, mandates }, context) }));
   async function request(url, { method = 'GET', body, cookie, headers = {}, signal } = {}) {
     const response = await fetch(origin + url, { method, signal,

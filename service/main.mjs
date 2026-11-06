@@ -14,6 +14,7 @@ import { mountWorkspace } from './workspace.mjs';
 import { createMandateService } from './mandates.mjs';
 import { createRequestTelemetry } from './observability.mjs';
 import { createShutdown } from './lifecycle.mjs';
+import { checkPythonAdapters, freezeAdapterStatus } from './adapter-preflight.mjs';
 
 export function readPayerKey(path) {
   let fd;
@@ -34,6 +35,11 @@ export async function buildRuntime(input = {}) {
   const config = Object.freeze({ ...base,
     payerPrivateKey: base.payerPrivateKey ?? (base.paymentEnabled && base.payerKeyFile ? readPayerKey(base.payerKeyFile) : null),
   });
+  // Immutable packaging capability, checked once even when inference is disabled.
+  // An explicit programmatic snapshot is the only trusted test-adapter override.
+  const adapterStatus = input.adapterStatus === undefined
+    ? await checkPythonAdapters({ python: config.python, signal: input.signal })
+    : freezeAdapterStatus(input.adapterStatus);
   let store = input.store;
   if (!store && config.databaseUrl) {
     const { PostgresStore } = await import('./postgres-store.mjs');
@@ -48,7 +54,7 @@ export async function buildRuntime(input = {}) {
   const workspace = await WorkspaceStore.open(store);
   const mandates = await createMandateService({ store, config });
   const telemetry = createRequestTelemetry({ write: input.writeLog });
-  const app = createApp({ config, store, gateway, reportProvider, ai, mountMerchant: input.mountMerchant ?? mountMerchant,
+  const app = createApp({ config, store, gateway, reportProvider, ai, adapterStatus, mountMerchant: input.mountMerchant ?? mountMerchant,
     observeRequest: input.observeRequest ?? telemetry.observeRequest,
     mountWorkspace: (app, context) => mountWorkspace(app, { repo: workspace, planner, mandates }, context),
     runtimeReadiness: () => mandates.readiness(),
@@ -58,7 +64,7 @@ export async function buildRuntime(input = {}) {
       observed: ({ task, owner }) => mandates.observe(owner, task),
     },
   });
-  return { app, config, store, gateway, reportProvider, ai, planner, workspace, mandates, telemetry, lifecycle: app.locals.lifecycle };
+  return { app, config, store, gateway, reportProvider, ai, planner, workspace, mandates, telemetry, adapterStatus: app.locals.adapterStatus, lifecycle: app.locals.lifecycle };
 }
 export async function start(input = {}) {
   const runtime = await buildRuntime(input);

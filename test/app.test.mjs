@@ -50,7 +50,8 @@ async function setup({ asyncStore = false, sessionTtlMs = 8 * 3600_000, taskHook
       return { status: 'EVIDENCE_READY', code: 'ANALYTICS_SUMMARY', answer: { is_synthetic: true, transfer_count: 0 }, html: '<p>Scripted test</p>', markdown: 'Scripted test' };
     },
   };
-  server.on('request', createApp({ config, store, gateway, ai, taskHooks, mountWorkspace }));
+  server.on('request', createApp({ config, store, gateway, ai, taskHooks, mountWorkspace,
+    adapterStatus: { workspaceAdapterReady: true, reportAdapterReady: true } }));
   async function request(path, { method = 'GET', body, cookie, headers = {} } = {}) {
     const response = await fetch(origin + path, { method, headers: { ...(method !== 'GET' ? { Origin: origin, 'Content-Type': 'application/json' } : {}),
       ...(cookie ? { Cookie: cookie } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
