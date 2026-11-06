@@ -1,0 +1,70 @@
+name: Solana runtime
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - service/**
+      - test/**
+      - scripts/**
+      - reference/**
+      - package.json
+      - package-lock.json
+      - Dockerfile
+      - .dockerignore
+      - render.yaml
+      - .github/workflows/solana-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: solana-runtime-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: reference
+      FLOWW_REQUIRE_POSTGRES_TESTS: 'true'
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+      - name: Install PostgreSQL test binaries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-16 postgresql-server-dev-16
+      - name: Install pinned dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check integration source
+        run: npm run check
+      - name: Run runtime and isolated PostgreSQL tests
+        run: npm test
+      - name: Run existing and integrated AI checks
+        run: python3 -m unittest discover -s reference/tests -v
+  container:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the non-root deployment image
+        run: docker build --tag floww-acceptance:${{ github.sha }} .
+      - name: Verify image imports, private routes and default payment guard
+        run: docker run --rm --network none floww-acceptance:${{ github.sha }} node scripts/container-smoke.mjs

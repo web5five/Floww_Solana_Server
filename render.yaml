@@ -1,0 +1,38 @@
+# Import this blueprint only after the destination and secrets are configured.
+# Deploys are manual: a push alone must not publish an unverified checkout.
+services:
+  - type: web
+    name: floww-solana
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    autoDeployTrigger: 'off'
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: FLOWW_DEPLOYMENT_MODE
+        value: remote
+      - key: FLOWW_HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_CA_PEM
+        sync: false
+      - key: FLOWW_ENABLE_DEVNET_PAYMENTS
+        value: false
+      - key: FLOWW_MODEL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MERCHANT_PAY_TO
+        sync: false
+      - key: X402_NETWORK
+        value: solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1
+      - key: SOLANA_RPC_URL
+        value: https://api.devnet.solana.com
+      - key: X402_FACILITATOR_URL
+        value: https://x402.org/facilitator

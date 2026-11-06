@@ -1,0 +1,67 @@
+{
+  "task": "AI-01 / AI-02 / AI-03 independent analytics preparation",
+  "recorded_at": "2026-10-21T19:13:46.595476+09:00",
+  "environment": {
+    "os": "Darwin",
+    "machine": "arm64",
+    "python": "3.14.6"
+  },
+  "base_commit": "95d0e4bb30abf32f2ee31e51923bd64e72e5eb5d",
+  "branch": "feature/ai-01-baseline-reference",
+  "checks": [
+    {
+      "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -m unittest discover -s reference/tests -v",
+      "exit_code": 0,
+      "evidence": "docs/ai/evidence/2026-10-21/unit-tests.txt"
+    },
+    {
+      "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.demo",
+      "exit_code": 0,
+      "evidence": "docs/ai/evidence/2026-10-21/generic-demo.jsonl"
+    },
+    {
+      "command": "/opt/homebrew/opt/python@3.14/bin/python3.14 -m ai_baseline.analytics_demo",
+      "exit_code": 0,
+      "evidence": "docs/ai/evidence/2026-10-21/analytics-demo.jsonl"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "docs/ai/evidence/2026-10-21/whitespace.txt"
+    }
+  ],
+  "tests": 70,
+  "generic_demo_cases": 6,
+  "analytics_demo_cases": 5,
+  "evidence_kind": "synthetic_fixture",
+  "source_sha256": {
+    "README.md": "fbf6f63af9f4732472ac5e5d075e565315bbe64a99daa0094e73ca7bfb326845",
+    "reference/ai_baseline/__init__.py": "7e7f64668c85b3c07adad1b74d0619fcc2395118caedac838bbf53d2ad46dad4",
+    "reference/ai_baseline/analytics.py": "8f4119b3ab13d2283b140b7dda6eb44c7e3cee92e1a8b3029ae7eeb9917876ab",
+    "reference/ai_baseline/analytics_demo.py": "8cd717a5ad389a5382c696982ca6aee60540149b023a0c28f18f9dc8ad30cb2c",
+    "reference/ai_baseline/demo.py": "2ced31a591e32d44176f6df8dc8c86fb8d9cdef6e460154a9af41eda40a76da5",
+    "reference/ai_baseline/fixtures.py": "cdb3db28b181645aff799b32499dca1f04b3260e3f602ceb4a0abc2ccf1a8c22",
+    "reference/ai_baseline/workflow.py": "effa17250d56d7df594ef6c44dc351b269b90e60c5222724f3fa6bb7c2e9ffd3",
+    "reference/tests/test_ai_baseline.py": "57b0c49239f64e8dcd06b59dfda44a368ad876095e888c1e0a38f6534db5f966",
+    "reference/tests/test_analytics.py": "c66db2d8f5a4f2a9f36e4c4844cd18c0c98fe079f9dc01f3c93f8761a605e9e8",
+    "reference/fixtures/analytics-report-v1.json": "575ec67ae40d9f6007b29abf2b9e06cf9685529b8ea907291e2f7419d80e2c35",
+    "docs/ai/AI-01_REVIEW_AND_HANDOFF.md": "f5417d7201d232cdd502a80da841b67b3439bfee24ad4693a9dbd1af7ae499cd",
+    "docs/ai/AI-01_WORKFLOW.md": "d360d42b9f244d0829bbe6bb68634da3027b742278dc0e22d1c1cf4586e41b65",
+    "docs/ai/AI_ANALYTICS_ADAPTER.md": "628a5eb1d4e5016df0f400846a9296c32f2e3b4e6275861c0a76303377843c02"
+  },
+  "integration_pending": [
+    "shared API/DTO review",
+    "provider report mapper and canonical identifiers",
+    "model provider and bounded runtime callbacks",
+    "payment and protected-body verification",
+    "durable idempotency/recovery",
+    "real paid-response and frontend integration"
+  ],
+  "not_verified": [
+    "actual model/provider behavior",
+    "HTTP 402 and Devnet settlement",
+    "production integration or deployment",
+    "independent teammate review",
+    "Windows execution"
+  ]
+}

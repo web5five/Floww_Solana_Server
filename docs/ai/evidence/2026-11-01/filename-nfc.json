@@ -1,0 +1,31 @@
+{
+  "method": "Read actual filesystem entry names and check each path component with Unicode NFC",
+  "verified": true,
+  "files": [
+    "README.md",
+    "docs/ai/AI-01_REVIEW_AND_HANDOFF.md",
+    "docs/ai/AI-01_WORKFLOW.md",
+    "docs/ai/AI_ANALYTICS_ADAPTER.md",
+    "docs/ai/AI_REPORT_OUTPUT.md",
+    "docs/ai/evidence/2026-11-01/analytics-demo.jsonl",
+    "docs/ai/evidence/2026-11-01/filename-nfc.json",
+    "docs/ai/evidence/2026-11-01/generic-demo.jsonl",
+    "docs/ai/evidence/2026-11-01/report-demo-smoke.json",
+    "docs/ai/evidence/2026-11-01/unit-tests.txt",
+    "docs/ai/evidence/2026-11-01/whitespace.txt",
+    "docs/ai/verification-2026-10-21.json",
+    "docs/ai/verification.json",
+    "reference/ai_baseline/__init__.py",
+    "reference/ai_baseline/analytics.py",
+    "reference/ai_baseline/analytics_demo.py",
+    "reference/ai_baseline/demo.py",
+    "reference/ai_baseline/fixtures.py",
+    "reference/ai_baseline/render.py",
+    "reference/ai_baseline/report_demo.py",
+    "reference/ai_baseline/workflow.py",
+    "reference/fixtures/analytics-report-v1.json",
+    "reference/tests/test_ai_baseline.py",
+    "reference/tests/test_analytics.py",
+    "reference/tests/test_render.py"
+  ]
+}

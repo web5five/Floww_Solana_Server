@@ -1,0 +1,15 @@
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!scripts/
+!scripts/container-smoke.mjs
+!service/
+!service/**
+!reference/
+!reference/ai_baseline/
+!reference/ai_baseline/**
+**/__pycache__/
+**/*.pyc
+**/.env*
+**/*.sqlite*

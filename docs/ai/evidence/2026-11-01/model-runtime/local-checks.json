@@ -1,0 +1,44 @@
+[
+  {
+    "environment": "python-3.13",
+    "version": "Python 3.13.3",
+    "command": [
+      "/Users/geondongkim/.pyenv/versions/3.13.3/bin/python3",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "reference/tests",
+      "-v"
+    ],
+    "exit_code": 0,
+    "evidence": "docs/ai/evidence/2026-11-01/model-runtime/python-3.13-tests.txt",
+    "tail": [
+      "----------------------------------------------------------------------",
+      "Ran 137 tests in 0.494s",
+      "",
+      "OK"
+    ]
+  },
+  {
+    "environment": "python-3.14",
+    "version": "Python 3.14.6",
+    "command": [
+      "/opt/homebrew/opt/python@3.14/bin/python3.14",
+      "-m",
+      "unittest",
+      "discover",
+      "-s",
+      "reference/tests",
+      "-v"
+    ],
+    "exit_code": 0,
+    "evidence": "docs/ai/evidence/2026-11-01/model-runtime/python-3.14-tests.txt",
+    "tail": [
+      "----------------------------------------------------------------------",
+      "Ran 137 tests in 0.479s",
+      "",
+      "OK"
+    ]
+  }
+]

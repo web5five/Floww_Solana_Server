@@ -1,0 +1,2 @@
+git diff --check: exit 0, no output.
+Trailing whitespace and final-newline checks passed for all 17 source/document files, including new untracked files.
