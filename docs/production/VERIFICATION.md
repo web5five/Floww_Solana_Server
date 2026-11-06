@@ -487,3 +487,29 @@ exact retry identity; UI retry across a language change; actual Node-to-Python
 subprocess-to-loopback Responses propagation; and actual Python stdin/stdout
 tests for priority and negation without external credentials. They prove local
 integration, not actual-provider language/refusal improvement or payment.
+
+
+## Conversation regression and Michael handoff — November7
+
+Source `d4a35ab8b24c524318816dfb894a5c2d5dec143d`, prompt `workspace/v5`,
+passed618 local Node tests with required isolated PostgreSQL (no skips) and274
+Python tests. Independent source review passed118 targeted checks; the explicit
+live supervisor passed18 offline checks. Syntax/whitespace/NFC checks passed.
+
+Actual Responses acceptance completed12/12 cases and32/32 stages with40 core
+role returns, plus2/2 interface-language probes with4 more returns. All44 POSTs
+had strict usage receipts, no retry or uncertainty, and81.039seconds total
+runtime. Independent agent review inspected all stages/probes/raw returns and
+found no additional P1/P2 or actionable finding in that sample. Actual-person
+review was not performed. [AI_QUALITY.md](AI_QUALITY.md) preserves prior failed
+samples and explains the small regression set, synthetic formatter facts and
+version5's raw-five/derived-six intent contract. No paid report, microphone,
+user-installed wallet, funded payment or public deployment is established by it.
+
+Michael's five implementation questions map to [TEAM_HANDOFF.md](../integration/TEAM_HANDOFF.md).
+Read-only external Devnet genesis, confirmed blockhash and facilitator exact-V2
+support probes all returned HTTP200 on November7. Infisical browser readback
+showed12 masked Development entries and only the owner's project Admin user;
+team sharing remains incomplete. Neither verification signed a transaction,
+changed grants or exposed a secret value. Required exact-source CI and actual
+container checks remain part of the normal PR release gate.

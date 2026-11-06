@@ -177,9 +177,28 @@ transfer retrieval, model arithmetic, payment, microphone or public deployment
 acceptance. Actual-person review remains distinct from controller/agent review,
 consistent with [OpenAI's evaluation guidance](https://developers.openai.com/api/docs/guides/evaluation-best-practices).
 
-Version5 integration and actual-provider reevaluation are in progress. Before
-new provider calls, the controller binds the frozen evaluator and production
-sources, obtains independent source/supervisor review and keeps prior costs in
-the cumulative$1 authorization. The pre-version5 conservative total is
-$0.72501075, including a historical$0.45 reserve and all four retained samples.
-Local checks, actual-provider results and exact-source CI remain separate gates.
+## Version5 actual result
+
+The sample at source `d4a35ab8b24c524318816dfb894a5c2d5dec143d` completed all
+12 cases/32 stages with40 actual core role returns. All12 cases/32 stages passed
+the automated criteria; no stage was skipped, guarded or workflow-blocked. Two
+separate interface-language probes passed with4 more actual role returns. The
+core includes8 generated plans plus critics and2 explicitly fixture-based
+negative critic probes, not10 generated plans.
+
+All44 POSTs had strict standard-tier usage receipts, with no retry or uncertain
+request. The run took81.039seconds. Its conservative usage calculation was
+$0.07977600. Together with the historical$0.45 reserve and all four earlier
+samples, the cumulative conservative total is$0.80478675 within the existing$1
+validation authorization. This is not invoice reconciliation. Each run has its
+own immutable results and budget ledger; an earlier failure is never replaced.
+
+Independent agent semantic review inspected all32 stages, both probes and44
+raw role returns. It found no additional P1/P2 or actionable finding in this
+sample; the earlier assistant-language failures were not observed.
+`humanReviewed=false`. Local checks pass618 Node tests
+with required isolated PostgreSQL and274 Python tests. Independent source review
+passed118 targeted checks, and the supervised caller passed18 offline checks.
+Actual-provider behavior, semantic review and exact-source CI are separate gates.
+A passing small authored regression set is not a general model accuracy claim,
+actual-person review, funded Devnet payment, microphone or public deployment proof.

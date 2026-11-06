@@ -5,7 +5,8 @@ with asynchronous `refine(input, {signal?})` and `plan(input, {signal?})` ports.
 The controller owns authenticated persistence, current revisions, plan hashes,
 approval and execution. This adapter has no payment, database or signing port.
 
-Input has exactly `messages`, `intent`, `memories`, `catalog`, `nowIso`.
+Input requires `messages`, `intent`, `memories`, `catalog`, `nowIso`, with optional
+`interfaceLanguage` limited to `ko` or `en`.
 `intent:null` and individual null scope fields are accepted. Intent fields are
 `purpose,wallet,windowStart,windowEnd,resourceId,missingFields`. Memory input is
 the controller's owner-filtered, unexpired explicit `{key,value}` preferences.
@@ -26,7 +27,8 @@ by a separate critic call using the same explicitly configured model and
 existing `OpenAIResponsesModel` transport. An ACCEPT with no issue codes is
 required. This is role separation, not independent evidence of model quality.
 There is no automatic retry, tool execution or model-configured destination.
-The original AI validators and transport are unchanged.
+Scope, authority and registered-resource guards apply independently of model
+claims. The Responses transport retains its existing safety bounds.
 
 The existing Responses transport provides strict JSON Schema, fixed official
 HTTPS destination, certificate verification, `store:false`, `stream:false`,
@@ -59,7 +61,13 @@ Refine returns `status:READY_TO_PLAN|CLARIFICATION_REQUIRED|UNSUPPORTED`,
 Plan returns `status:PROPOSED`, `summary,steps,limitations` plus the same metadata.
 `executionKind` is `live_model_intent_refinement` or `live_model_planner_critic`.
 `modelVersion` is the configured model identifier, not an independently resolved
-provider version. `promptVersion` is `workspace/v1`.
+provider version. `promptVersion` is `workspace/v5`.
+
+The internal refiner role emits exactly the five scope fields, with no
+`missingFields`. The adapter validates them and derives the public six-field
+intent list from actual nulls. Extra model fields and empty strings are rejected;
+status, goal, anchors and resource are never repaired or promoted. Current-user,
+temporal and language bindings are described in [AI_QUALITY.md](AI_QUALITY.md).
 
 Failures are fixed `{status:'STOPPED',code}` objects. Missing configuration is
 `MODEL_NOT_CONFIGURED`; it cannot return successful inference. Other codes cover
