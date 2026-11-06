@@ -2,9 +2,12 @@
 
 Geondong explicitly asked this controller to take all implementation roles and
 build a larger production-oriented Floww service. Earlier AI-only and narrow
-one-report milestone boundaries do not limit this work. The current source is
-`a272a4190f0dcfdf1883c88f677b51fde13444b0`; preserve it as the integration baseline.
-Work continues on `feature/production-workspace` in the existing checkout.
+one-report milestone boundaries do not limit this work. The initial integration
+baseline was `a272a4190f0dcfdf1883c88f677b51fde13444b0`. The production-workspace
+expansion merged through PR #9 as `418c271f4fa19fb81cdc56cf89fc59ee9902bfaa`.
+The `feature/goal-first-experience` follow-up applies Geondong's request to
+reflect the earlier product/UX discussions. See [EXPERIENCE.md](EXPERIENCE.md)
+for source attribution, implemented behavior and acceptance boundaries.
 
 ## Product outcome
 

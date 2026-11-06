@@ -33,7 +33,8 @@ existing non-root PostgreSQL binaries. Runtime tests use scripted transports and
 real loopback HTTP/process/DB behavior; they do not prove external settlement.
 Actual model calls, wallet acceptance and cloud deployment remain distinct.
 
-See the [workspace guide](docs/production/WORKSPACE.md),
+See the [purpose-first experience](docs/production/EXPERIENCE.md),
+[workspace guide](docs/production/WORKSPACE.md),
 [planner roles](docs/production/PLANNER.md), [budget ledger](docs/production/MANDATES.md),
 [API contract](docs/integration/API.md), [payment transport](docs/integration/X402.md),
 [report/AI integration](docs/integration/PROVIDER_AI.md),

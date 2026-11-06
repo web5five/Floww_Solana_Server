@@ -2,7 +2,7 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const state = { wallet: null, health: null, tasks: [], activeId: null, initializing: true, busy: false, busyLabel: '', approvalHash: null, provider: null,
-    nextCursor: null, pendingCreate: null, sessionEpoch: 0 };
+    nextCursor: null, pendingCreate: null, sessionEpoch: 0, selectionEpoch: 0, pendingSelection: null };
   let announcedWallet;
   const policyNames = { PENDING: '승인 대기', ALLOW: '승인됨', DENY: '승인되지 않음' };
   const paymentNames = { NOT_STARTED: '시작 전', SIGNING: '서명 준비 중', PENDING: '확인 중', UNKNOWN: '확인 필요', CONFIRMED: '결제 확인됨', FAILED: '거래 실패' };
@@ -19,6 +19,7 @@
     INVALID_ANALYTICS_SCOPE: '조회 기간은 현재 이전의 최대 7일로 설정해 주세요.', INVALID_REPORT_WINDOW: '조회 기간을 다시 확인해 주세요.',
     EXPLICIT_APPROVAL_REQUIRED: '결제 조건을 읽고 동의 항목을 선택해 주세요.',
     BUDGET_DENIED: '지출 한도가 결제 금액보다 작거나 서비스 한도를 넘었습니다.',
+    INVALID_AMOUNT: '금액을 숫자로 입력하고 소수점 자릿수를 확인해 주세요.',
     APPROVAL_EXPIRED: '결제 조건이나 승인의 기한이 지났습니다. 새 조건을 확인하고 다시 승인해 주세요.',
     QUOTE_REQUIRED: '먼저 결제 조건을 확인해 주세요.', PAYER_CHANGED: '서비스 결제 지갑이 바뀌었습니다. 새 조건을 확인해 주세요.',
     PAYMENT_NOT_READY: 'Devnet 결제 설정을 준비 중입니다. 설정이 완료된 뒤 승인할 수 있습니다.',
@@ -53,6 +54,21 @@
   };
   const liveQuote = task => task?.quote && Date.parse(task.quote.expiresAt) > Date.now();
   const liveApproval = task => task?.approval && !task.approval.revoked && Date.parse(task.approval.expiresAt) > Date.now();
+  const untouched = task => task?.payment === 'NOT_STARTED' && !task.archivedAt && !task.attemptRef &&
+    !task.signedData && !task.transaction && !(task.events ?? []).some(event =>
+      ['EXECUTION_CLAIMED', 'PAYMENT_PREPARED', 'PAYMENT_SUBMITTED', 'PAYMENT_OBSERVED', 'PAYMENT_RECONCILED'].includes(event.type));
+  const sameQuote = (left, right) => left && right && ['hash', 'amountAtomic', 'asset', 'assetDecimals',
+    'network', 'recipient', 'payer', 'resourceUrl', 'expiresAt'].every(key => left[key] === right[key]);
+  function exactApproval(task) {
+    const approval = task?.approval, quote = task?.quote;
+    return untouched(task) && task.policy === 'ALLOW' && liveQuote(task) && liveApproval(task) &&
+      typeof approval.id === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(approval.id) &&
+      approval.quoteHash === quote.hash && approval.payer === quote.payer;
+  }
+  function assertSelection(selection) {
+    if (state.sessionEpoch !== selection.sessionEpoch || state.wallet !== selection.wallet) throw { code: 'AUTHENTICATION_REQUIRED', stale: true };
+    if (state.selectionEpoch !== selection.selectionEpoch || state.activeId !== selection.id) throw { code: 'TASK_CHANGED' };
+  }
 
   function notice(code) {
     $('notice-text').textContent = errors[code] ?? '요청을 처리하지 못했습니다. 현재 상태를 확인한 뒤 다시 진행해 주세요.';
@@ -85,26 +101,26 @@
   }
 
   function clearSession() {
-    state.sessionEpoch++;
+    state.sessionEpoch++; state.selectionEpoch++; state.pendingSelection = null;
     state.wallet = null; state.tasks = []; state.activeId = null; state.approvalHash = null; state.nextCursor = null; state.pendingCreate = null;
     $('request-form').reset(); $('approval-form').reset(); $('include-archived').checked = false;
     $('window-end').value = localDate(Date.now() - 1000); $('window-start').value = localDate(Date.now() - 86_400_000);
     clearNotice();
     for (const id of ['result-content', 'timeline', 'quote-details']) $(id).replaceChildren();
-    for (const id of ['task-meta', 'quote-price', 'quote-atomic', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) $(id).textContent = '';
+    for (const id of ['task-meta', 'quote-price', 'quote-atomic', 'quote-parties', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) $(id).textContent = '';
     $('execution-title').textContent = '선택한 요청'; $('transaction-link').removeAttribute('href');
     render();
   }
   async function perform(label, action) {
     if (state.busy || state.initializing) return;
     clearNotice(); state.busy = true; state.busyLabel = label;
-    updateControls();
+    render();
     try { await action(); announce(label.replace(/\s중$/, '') + ' 완료'); }
     catch (error) {
       if (error?.stale) return;
       if (error?.status === 401) clearSession();
       notice(error?.code);
-    } finally { state.busy = false; state.busyLabel = ''; render(); }
+    } finally { state.busy = false; state.busyLabel = ''; render(); flushSelection(); }
   }
 
   function taskSummary(task) {
@@ -127,7 +143,7 @@
     if (['SIGNING', 'PENDING'].includes(task.payment)) return '승인된 요청을 처리하고 있습니다. 같은 결제를 다시 실행하지 않고 상태를 확인합니다.';
     if (task.quote && !liveQuote(task)) return '결제 조건의 유효 시간이 지났습니다. 최신 조건을 확인한 뒤 다시 승인해 주세요.';
     if (task.policy === 'ALLOW' && liveApproval(task)) return '승인한 조건으로 실행할 준비가 됐습니다. 아래 실행 버튼을 누르면 Devnet 결제가 시작됩니다.';
-    if (task.quote) return '수신자와 토큰, 금액을 확인해 주세요. 승인만으로 결제가 시작되지는 않습니다.';
+    if (task.quote) return '수신자와 토큰, 금액을 확인한 뒤 승인하고 실행해 주세요.';
     return '실제 자료 제공 서비스에서 결제 조건을 가져온 뒤, 승인 여부를 결정할 수 있습니다.';
   }
 
@@ -148,20 +164,13 @@
       const meta = element('span', null, 'task-item-meta');
       meta.append(element('span', dateText(task.createdAt)), element('span', task.archivedAt ? '보관됨 · ' + taskSummary(task).text : taskSummary(task).text, 'task-item-state'));
       button.append(meta);
-      button.addEventListener('click', () => perform('요청 상태 확인 중', async () => {
-        const selected = await api('/api/tasks/' + encodeURIComponent(task.id));
-        if (!state.wallet) return;
-        acceptTask(selected); state.activeId = task.id;
-      }));
+      button.addEventListener('click', () => requestSelection({ id: task.id }));
       return button;
     }));
   }
   function amountDisplay(amount, decimals) {
-    if (typeof amount !== 'string' || !/^[0-9]{1,78}$/.test(amount) || !Number.isInteger(decimals) || decimals < 0 || decimals > 18) return '금액 확인 필요';
-    if (decimals === 0) return amount;
-    const padded = amount.padStart(decimals + 1, '0');
-    const fraction = padded.slice(-decimals).replace(/0+$/, '');
-    return padded.slice(0, -decimals) + (fraction ? '.' + fraction : '');
+    try { return window.FlowwUnits.format(amount, decimals); }
+    catch { return '금액 확인 필요'; }
   }
   function quoteDetail(label, value) {
     return [element('dt', label), element('dd', value || '설정 대기')];
@@ -171,6 +180,7 @@
     $('quote-summary').hidden = !quote;
     $('proposal-note').hidden = !task.proposal?.explanation;
     $('proposal-note').textContent = task.proposal?.explanation || '';
+    $('quote-parties').textContent = quote ? '결제 지갑 ' + short(quote.payer) + ' · 수신자 ' + short(quote.recipient) + ' · 토큰 mint ' + short(quote.asset) : '';
     if (!quote) { state.approvalHash = null; return; }
     $('quote-price').textContent = amountDisplay(quote.amountAtomic, quote.assetDecimals) + ' 토큰';
     $('quote-atomic').textContent = quote.amountAtomic + ' 기본 단위';
@@ -179,16 +189,17 @@
       ...quoteDetail('토큰 mint', quote.asset), ...quoteDetail('네트워크', 'Solana Devnet'),
       ...quoteDetail('조건 기한', dateText(quote.expiresAt)),
     ]);
-    if (state.approvalHash !== quote.hash) {
-      state.approvalHash = quote.hash;
-      $('budget').value = quote.amountAtomic;
+    const displayed = task.id + ':' + quote.hash;
+    if (state.approvalHash !== displayed) {
+      state.approvalHash = displayed;
+      $('budget').value = amountDisplay(quote.amountAtomic, quote.assetDecimals);
       $('approval-expiry').value = localDate(Math.min(Date.now() + 5 * 60_000, Date.parse(quote.expiresAt) - 1000));
       $('approval-ack').checked = false;
     }
     $('approval-expiry').max = localDate(quote.expiresAt);
     const approved = task.approval && !task.approval.revoked;
     $('approval-status').hidden = !approved;
-    $('approval-status').textContent = approved ? '승인한 지출 한도 ' + task.approval.budgetAtomic + ' 기본 단위 · ' + dateText(task.approval.expiresAt) + '까지' : '';
+    $('approval-status').textContent = approved ? '승인한 지출 한도 ' + amountDisplay(task.approval.budgetAtomic, quote.assetDecimals) + ' 토큰 · ' + dateText(task.approval.expiresAt) + '까지' : '';
   }
   function renderTimeline(task) {
     const events = Array.isArray(task.events) ? task.events : [];
@@ -239,6 +250,7 @@
   function renderSelection() {
     const task = active();
     $('selection-empty').hidden = Boolean(task); $('selection-content').hidden = !task;
+    $('selection-content').dataset.resultReady = String(Boolean(task?.result?.answer));
     if (!task) return;
     $('execution-title').textContent = task.purpose;
     $('task-meta').textContent = short(task.wallet, 8) + ' · ' + dateText(task.windowStart) + ' – ' + dateText(task.windowEnd);
@@ -260,21 +272,21 @@
     $('refresh-tasks').disabled = !authenticated || busy;
     $('login-hint').hidden = authenticated;
     document.querySelectorAll('.task-item').forEach(button => { button.disabled = busy; });
-    for (const input of document.querySelectorAll('#workspace form input,#workspace form textarea')) input.disabled = busy;
+    for (const input of document.querySelectorAll('#request-form input,#request-form textarea,#approval-form input,#approval-form textarea')) input.disabled = busy;
     $('include-archived').disabled = busy || !authenticated; $('more-tasks').disabled = busy || !authenticated;
     $('action-status').textContent = busy ? state.busyLabel + '…' : '';
     if (!task) return;
     $('task-guidance').textContent = guidance(task);
     const status = taskSummary(task);
     $('task-state').textContent = status.text; $('task-state').className = 'state-pill ' + status.className;
-    const notStarted = task.payment === 'NOT_STARTED' && !task.archivedAt;
+    const notStarted = untouched(task);
     $('quote-task').hidden = !notStarted;
     $('quote-task').textContent = task.quote ? '결제 조건 다시 확인' : '결제 조건 확인';
     $('quote-task').disabled = busy || !authenticated;
     $('approval-form').hidden = !notStarted || !task.quote || (task.policy === 'ALLOW' && liveApproval(task));
     $('approve-task').disabled = busy || !authenticated || !liveQuote(task) || !state.health?.ready || !$('approval-ack').checked;
     $('execute-task').hidden = !notStarted || task.policy !== 'ALLOW';
-    $('execute-task').disabled = busy || !authenticated || !liveQuote(task) || !liveApproval(task) || !state.health?.ready;
+    $('execute-task').disabled = busy || !authenticated || !exactApproval(task) || !state.health?.ready;
     $('revoke-task').hidden = !notStarted || !task.approval || task.approval.revoked;
     $('revoke-task').disabled = busy || !authenticated;
     $('reconcile-task').hidden = !['UNKNOWN', 'PENDING', 'SIGNING'].includes(task.payment);
@@ -289,8 +301,11 @@
   function render() {
     renderHealth(); renderHistory(); renderSelection(); updateControls();
     if (announcedWallet !== state.wallet) { announcedWallet = state.wallet; emitSession(); }
+    window.dispatchEvent(new CustomEvent('floww:selection', { detail: { wallet: state.wallet, task: active(), busy: state.busy } }));
   }
-  function emitSession() { window.dispatchEvent(new CustomEvent('floww:session', { detail: { wallet: state.wallet, health: state.health } })); }
+  function emitSession() { window.dispatchEvent(new CustomEvent('floww:session', { detail: {
+    wallet: state.wallet, health: state.health, initializing: state.initializing,
+  } })); }
   function acceptTask(task) {
     if (!task || typeof task.id !== 'string') throw { code: 'RESPONSE_UNAVAILABLE' };
     const index = state.tasks.findIndex(old => old.id === task.id);
@@ -314,17 +329,42 @@
     if (!state.tasks.some(task => task.id === state.activeId)) state.activeId = state.tasks[0]?.id ?? null;
     if (state.activeId) await refreshSelected();
   }
-  async function selectedAction(action, body = {}) {
+  async function selectedAction(action, body = {}, id = state.activeId) {
     const task = active();
-    if (!task) return;
-    const updated = await api('/api/tasks/' + encodeURIComponent(task.id) + '/' + action, 'POST', body);
+    if (!task || task.id !== id) throw { code: 'TASK_CHANGED' };
+    const updated = await api('/api/tasks/' + encodeURIComponent(id) + '/' + action, 'POST', body);
+    if (updated?.id !== id) throw { code: 'RESPONSE_UNAVAILABLE' };
     if (state.wallet) acceptTask(updated);
+    return updated;
   }
   async function refreshSelected() {
     const id = state.activeId;
     if (!id) return;
     const updated = await api('/api/tasks/' + encodeURIComponent(id));
+    if (updated?.id !== id) throw { code: 'RESPONSE_UNAVAILABLE' };
     if (state.wallet) acceptTask(updated);
+  }
+  function requestSelection(detail) {
+    const id = detail?.id;
+    if (!state.wallet || typeof id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)) return;
+    if (id !== state.activeId) state.selectionEpoch++;
+    const requested = { id, prepareQuote: detail.prepareQuote === true };
+    if (state.busy || state.initializing) { state.pendingSelection = requested; return; }
+    return perform('작업 상세 확인 중', async () => {
+      const task = await api('/api/tasks/' + encodeURIComponent(id));
+      if (task?.id !== id) throw { code: 'RESPONSE_UNAVAILABLE' };
+      if (!state.wallet) return;
+      acceptTask(task); state.activeId = id;
+      if (requested.prepareQuote && untouched(task) && !task.quote) {
+        state.busyLabel = '결제 조건 확인 중'; render();
+        await selectedAction('quote', {}, id);
+      }
+    });
+  }
+  function flushSelection() {
+    if (state.busy || state.initializing || !state.pendingSelection) return;
+    const detail = state.pendingSelection; state.pendingSelection = null;
+    if (state.wallet) return requestSelection(detail);
   }
 
   $('dismiss-notice').addEventListener('click', clearNotice);
@@ -367,18 +407,14 @@
   $('restore-task').addEventListener('click', () => perform('요청 복원 중', async () => { await selectedAction('restore'); await loadTasks(); }));
   window.addEventListener('floww:session-refresh', emitSession);
   window.addEventListener('floww:session-expired', event => { if (state.wallet && event.detail?.wallet === state.wallet) clearSession(); });
-  window.addEventListener('floww:select-task', event => perform('작업 상세 확인 중', async () => {
-    const id = event.detail?.id;
-    if (!state.wallet || typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id)) return;
-    const task = await api('/api/tasks/' + encodeURIComponent(id));
-    if (state.wallet) { acceptTask(task); state.activeId = task.id; }
-  }));
+  window.addEventListener('floww:select-task', event => requestSelection(event.detail));
   $('refresh-task').addEventListener('click', () => perform('실행 상태 확인 중', refreshSelected));
   $('quote-task').addEventListener('click', () => perform('결제 조건 확인 중', () => selectedAction('quote')));
   $('execute-task').addEventListener('click', () => perform('승인한 결제 실행 중', async () => {
     const task = active();
-    if (!liveQuote(task) || !liveApproval(task)) throw { code: 'APPROVAL_EXPIRED' };
-    await selectedAction('execute', { approvalId: task.approval.id });
+    if (!exactApproval(task)) throw { code: 'APPROVAL_EXPIRED' };
+    if (!state.health?.ready) throw { code: 'PAYMENT_NOT_READY' };
+    await selectedAction('execute', { approvalId: task.approval.id }, task.id);
   }));
   $('revoke-task').addEventListener('click', () => perform('승인 취소 중', () => selectedAction('revoke')));
   $('reconcile-task').addEventListener('click', () => perform('원래 결제 확인 중', () => selectedAction('reconcile')));
@@ -388,14 +424,25 @@
   $('approval-form').addEventListener('submit', event => {
     event.preventDefault();
     if (!$('approval-form').reportValidity()) return;
-    perform('결제 조건 승인 중', async () => {
+    perform('승인한 조건으로 실행 중', async () => {
       const task = active();
+      if (!untouched(task)) throw { code: 'EXECUTION_ALREADY_CLAIMED' };
       if (!liveQuote(task)) throw { code: 'APPROVAL_EXPIRED' };
       if (!$('approval-ack').checked) throw { code: 'EXPLICIT_APPROVAL_REQUIRED' };
-      const cap = $('budget').value.trim();
-      if (!/^[1-9][0-9]{0,18}$/.test(cap) || BigInt(cap) < BigInt(task.quote.amountAtomic)) throw { code: 'BUDGET_DENIED' };
+      if (!state.health?.ready) throw { code: 'PAYMENT_NOT_READY' };
+      const cap = window.FlowwUnits.parse($('budget').value, task.quote.assetDecimals);
+      if (BigInt(cap) < BigInt(task.quote.amountAtomic)) throw { code: 'BUDGET_DENIED' };
       const expiresAt = new Date($('approval-expiry').value).toISOString();
-      await selectedAction('approve', { quoteHash: task.quote.hash, budgetAtomic: cap, expiresAt, acknowledge: true });
+      const selection = { id: task.id, wallet: state.wallet, sessionEpoch: state.sessionEpoch, selectionEpoch: state.selectionEpoch };
+      const quote = { ...task.quote };
+      const approved = await api('/api/tasks/' + encodeURIComponent(selection.id) + '/approve', 'POST',
+        { quoteHash: quote.hash, budgetAtomic: cap, expiresAt, acknowledge: true });
+      assertSelection(selection);
+      if (approved?.id !== selection.id || !sameQuote(approved.quote, quote) || !exactApproval(approved) ||
+          approved.wallet !== task.wallet || approved.windowStart !== task.windowStart || approved.windowEnd !== task.windowEnd ||
+          approved.approval.budgetAtomic !== cap || approved.approval.expiresAt !== expiresAt) throw { code: 'TASK_CHANGED' };
+      acceptTask(approved); assertSelection(selection);
+      await selectedAction('execute', { approvalId: approved.approval.id }, selection.id);
     });
   });
   $('request-form').addEventListener('submit', event => {
@@ -448,6 +495,6 @@
       await loadTasks();
     } catch (error) { if (error.status !== 401) notice(error.code); }
     state.initializing = false;
-    render();
+    render(); emitSession(); flushSelection();
   })();
 })();

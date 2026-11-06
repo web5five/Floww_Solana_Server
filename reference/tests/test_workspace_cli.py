@@ -6,6 +6,7 @@ import os
 import threading
 import time
 import unittest
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
@@ -124,6 +125,170 @@ class WorkspaceRoleTests(unittest.TestCase):
         data["messages"][-1]["text"] = "Use 2026-11-03T00:00:00Z to 2026-11-05T00:00:00Z."
         result = refined(data); result["intent"].update(windowStart="2026-11-03T00:00:00Z", windowEnd="2026-11-05T00:00:00Z")
         self.assertEqual(run("refine", data, ScriptedModel(result))["status"], "READY_TO_PLAN")
+
+    def test_korean_named_relative_durations_bind_exact_rolling_utc_scope(self):
+        for prefix in ("지난", "최근"):
+            for word, days in (("하루", 1), ("이틀", 2), ("사흘", 3), ("일주일", 7)):
+                with self.subTest(prefix=prefix, word=word):
+                    data = payload()
+                    data["messages"][-1]["text"] = f"{prefix} {word} 동안 관찰된 입출금 흐름을 정리해 주세요."
+                    now = datetime.fromisoformat(data["nowIso"].replace("Z", "+00:00"))
+                    expected = {"wallet": WALLET,
+                        "windowStart": (now - timedelta(days=days)).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                        "windowEnd": now.isoformat(timespec="milliseconds").replace("+00:00", "Z")}
+                    self.assertEqual(normalize(data)["explicitScopeAnchors"], expected)
+                    response = refined(data); response["intent"].update(expected)
+                    model = ScriptedModel(response)
+                    result = run("refine", data, model)
+                    self.assertEqual(result["status"], "READY_TO_PLAN")
+                    self.assertEqual(result["intent"]["windowStart"], expected["windowStart"])
+                    self.assertEqual(len(model.calls), 1)
+
+    def test_latest_korean_named_duration_overrides_earlier_duration_and_snapshot(self):
+        data = payload()
+        data["messages"] = [{"id": "earlier", "role": "user", "text": "지난 하루를 확인해 주세요."},
+            {"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."},
+            {"id": "correction", "role": "user", "text": "아니, 최근 사흘로 바꿔 주세요."}]
+        old = ScriptedModel(refined(data))
+        self.assertEqual(run("refine", data, old)["code"], "WORKSPACE_STALE_CONTEXT")
+        response = refined(data)
+        response["intent"].update(windowStart="2026-11-03T12:00:00.000Z", windowEnd="2026-11-06T12:00:00.000Z")
+        self.assertEqual(run("refine", data, ScriptedModel(response))["status"], "READY_TO_PLAN")
+
+    def test_compound_and_negated_korean_durations_stay_unresolved(self):
+        for phrase in ("최근 하루 반 동안", "최근 하루이틀 동안", "지난 하루가 아니라 이틀",
+                       "지난 하루 12시간", "최근 사흘 또는 이틀", "지난 하루, 아니 이틀",
+                       "최근 사흘, 또는 이틀", "최근 하루 + 12시간", "최근 하루/이틀", "최근 하루, + 나흘",
+                       "최근 하루 이상", "최근 사흘 미만", "최근 이틀 정도", "최근 하루 반만"):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
+                clarification = refined(data, status="CLARIFICATION_REQUIRED", assistantText="정확한 관찰 기간을 알려 주세요.")
+                clarification["intent"].update(windowStart=None, windowEnd=None, missingFields=["windowStart", "windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
+                model = ScriptedModel()
+                self.assertEqual(run("plan", data, model)["status"], "STOPPED"); self.assertEqual(model.calls, [])
+
+    def test_named_duration_suffix_and_latest_complete_correction_remain_supported(self):
+        for text, start in (("최근 사흘간", "2026-11-03T12:00:00.000Z"),
+                            ("지난 하루가 아니라 최근 이틀", "2026-11-04T12:00:00.000Z")):
+            with self.subTest(text=text):
+                data = payload(); data["messages"][-1]["text"] = text
+                self.assertEqual(normalize(data)["explicitScopeAnchors"]["windowStart"], start)
+                response = refined(data)
+                response["intent"].update(windowStart=start, windowEnd="2026-11-06T12:00:00.000Z")
+                self.assertEqual(run("refine", data, ScriptedModel(response))["status"], "READY_TO_PLAN")
+
+    def test_multiple_duration_additions_and_alternatives_cannot_choose_one_scope(self):
+        for phrase in ("최근 하루 그리고 12시간", "지난 하루, 그리고 이틀", "최근 하루 또는 최근 이틀",
+                       "최근 하루 그리고 최근 이틀", "최근 이틀 혹은 최근 사흘", "최근 하루 + 최근 이틀"):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
+                clarification = refined(data, status="CLARIFICATION_REQUIRED", assistantText="하나의 정확한 관찰 기간을 알려 주세요.")
+                clarification["intent"].update(windowStart=None, windowEnd=None, missingFields=["windowStart", "windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
+                model = ScriptedModel()
+                self.assertEqual(run("plan", data, model)["status"], "STOPPED"); self.assertEqual(model.calls, [])
+
+    def test_only_an_explicit_complete_replacement_selects_the_latest_duration(self):
+        for phrase in ("지난 하루가 아니라 최근 이틀", "지난 하루 말고 최근 이틀", "지난 하루 대신 최근 이틀"):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertEqual(anchors["windowStart"], "2026-11-04T12:00:00.000Z")
+                response = refined(data); response["intent"].update(anchors)
+                result = run("refine", data, ScriptedModel(response))
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+                data["intent"] = result["intent"]
+                data["messages"].append({"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."})
+                self.assertEqual(run("plan", data, ScriptedModel(planned(data), critic(data)))["status"], "PROPOSED")
+
+    def test_named_duration_connectors_require_clarification_without_parsing_the_tail(self):
+        for phrase in ("최근 하루 그리고 한 시간", "최근 하루 그리고 나흘",
+                       "최근 하루 동안, 그리고 한 시간", "최근 사흘간은, 그리고 나흘",
+                       "지난 하루를, 그리고 한 시간", "최근 이틀 및 한 시간",
+                       "최근 사흘 또는 나흘", "최근 하루 아니면 한 시간",
+                       "최근 하루 그리고 입출금 요약"):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
+                # A model echoing a guessed 24/48/72-hour scope cannot make it ready.
+                guessed = refined(data)
+                guessed["intent"].update(windowStart="2026-11-05T12:00:00.000Z",
+                    windowEnd="2026-11-06T12:00:00.000Z")
+                model = ScriptedModel(guessed)
+                self.assertEqual(run("refine", data, model)["status"], "STOPPED")
+                self.assertEqual(len(model.calls), 1)
+                clarification = refined(data, status="CLARIFICATION_REQUIRED",
+                    assistantText="하나의 정확한 관찰 기간을 알려 주세요.")
+                clarification["intent"].update(windowStart=None, windowEnd=None,
+                    missingFields=["windowStart", "windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
+                model = ScriptedModel()
+                self.assertEqual(run("plan", data, model)["status"], "STOPPED")
+                self.assertEqual(model.calls, [])
+
+    def test_single_named_period_with_purpose_and_style_keeps_its_scope(self):
+        for phrase in ("최근 하루 동안 입출금 요약을 작성해 주세요.",
+                       "최근 하루 입출금을 정리하고 한국어로 설명해 주세요.",
+                       "최근 하루 관찰 내역을 요약해 주세요. 그리고 한국어로 설명해 주세요."):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertEqual(anchors["windowStart"], "2026-11-05T12:00:00.000Z")
+                response = refined(data); response["intent"].update(anchors)
+                result = run("refine", data, ScriptedModel(response))
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+                data["intent"] = result["intent"]
+                data["messages"].append({"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."})
+                self.assertEqual(run("plan", data, ScriptedModel(planned(data), critic(data)))["status"], "PROPOSED")
+
+    def test_korean_named_scope_stays_frozen_for_planning_and_style_only_followup(self):
+        for word, days in (("하루", 1), ("이틀", 2), ("사흘", 3), ("일주일", 7)):
+            with self.subTest(word=word):
+                data = payload()
+                data["messages"] = [{"id": "original", "role": "user", "text": f"지난 {word} 입출금을 확인해 주세요."}]
+                anchors = normalize(data)["explicitScopeAnchors"]
+                data["intent"].update(anchors)
+                data["messages"].append({"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."})
+                data["nowIso"] = "2026-11-06T13:00:00Z"
+                self.assertEqual(normalize(data, operation="plan")["explicitScopeAnchors"], anchors)
+                self.assertEqual(run("plan", data, ScriptedModel(planned(data), critic(data)))["status"], "PROPOSED")
+                data["messages"].append({"id": "style", "role": "user", "text": "같은 범위를 한국어로 간단하게 설명해 주세요."})
+                data["nowIso"] = "2026-11-06T14:00:00Z"
+                result = run("refine", data, ScriptedModel(refined(data)))
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+                self.assertEqual({key: result["intent"][key] for key in anchors}, anchors)
+
+    def test_existing_numeric_korean_and_english_durations_remain_exact(self):
+        for phrase, delta in (("지난 1일", timedelta(days=1)), ("최근 24시간", timedelta(days=1)),
+                              ("지난 7일", timedelta(days=7)), ("last 48 hours", timedelta(days=2)),
+                              ("past 3 days", timedelta(days=3))):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                start = datetime.fromisoformat(anchors["windowStart"].replace("Z", "+00:00"))
+                end = datetime.fromisoformat(anchors["windowEnd"].replace("Z", "+00:00"))
+                self.assertEqual(end - start, delta)
+
+    def test_more_than_seven_days_is_not_clamped_or_planned_after_korean_correction(self):
+        data = payload()
+        data["messages"] = [{"id": "earlier", "role": "user", "text": "지난 하루를 확인해 주세요."},
+            {"id": "correction", "role": "user", "text": "최근 8일로 변경해 주세요."}]
+        anchors = normalize(data)["explicitScopeAnchors"]
+        self.assertEqual(anchors["windowStart"], "2026-10-29T12:00:00.000Z")
+        response = refined(data); response["intent"].update(anchors)
+        self.assertEqual(run("refine", data, ScriptedModel(response))["code"], "WORKSPACE_INVALID_MODEL_OUTPUT")
+        data["intent"].update(anchors)
+        model = ScriptedModel()
+        self.assertEqual(run("plan", data, model)["code"], "WORKSPACE_SCOPE_REQUIRED")
+        self.assertEqual(model.calls, [])
 
     def test_relative_window_does_not_slide_during_plan_or_later_style_turn(self):
         data = payload()
