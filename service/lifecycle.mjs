@@ -14,7 +14,8 @@ export function createLifecycle({ probe, probeTimeoutMs = 2500, probeCacheMs = 1
     throw new ServiceError('INVALID_LIFECYCLE_CONFIGURATION', 500);
   }
   let draining = false, requests = 0, work = 0, cached = null, flight = null;
-  const idleWaiters = new Set();
+  const idleWaiters = new Set(), drainListeners = new Set();
+  const notifyDrain = listener => { try { Promise.resolve(listener()).catch(() => {}); } catch {} };
   const notify = () => {
     if (requests || work) return;
     for (const resolve of idleWaiters) resolve();
@@ -63,7 +64,18 @@ export function createLifecycle({ probe, probeTimeoutMs = 2500, probeCacheMs = 1
   return Object.freeze({
     get draining() { return draining; },
     readiness,
-    beginDrain() { draining = true; cached = null; },
+    beginDrain() {
+      if (draining) return;
+      draining = true; cached = null;
+      const listeners = [...drainListeners]; drainListeners.clear();
+      for (const listener of listeners) notifyDrain(listener);
+    },
+    onDrain(listener) {
+      if (typeof listener !== 'function') throw new ServiceError('INVALID_LIFECYCLE_CONFIGURATION', 500);
+      if (draining) { notifyDrain(listener); return () => {}; }
+      if (drainListeners.size >= 32) throw new ServiceError('OPERATION_LIMIT_REACHED', 429);
+      drainListeners.add(listener); return () => drainListeners.delete(listener);
+    },
     assertAccepting() {
       if (draining) { const error = new ServiceError('SERVICE_DRAINING', 503); error.retryAfter = 1; throw error; }
     },

@@ -25,7 +25,8 @@
   const routes = ['liveness', 'readiness', 'capabilities', 'session', 'login_challenge', 'login_verify', 'logout', 'tasks', 'task_detail',
     'task_archive', 'task_restore', 'task_quote', 'task_approve', 'task_revoke', 'task_execute', 'task_reconcile', 'task_recover',
     'catalog', 'dashboard', 'activity', 'conversations', 'conversation_detail', 'conversation_messages', 'conversation_plan', 'conversation_confirm',
-    'memories', 'memory_detail', 'mandates', 'mandate_revoke', 'admin_access', 'admin_overview', 'admin_events', 'admin_requests', 'merchant_report', 'unclassified'];
+    'memories', 'memory_detail', 'mandates', 'mandate_revoke', 'admin_access', 'admin_overview', 'admin_events', 'admin_requests',
+    'voice_capabilities', 'voice_transcription', 'merchant_report', 'unclassified'];
   const methods = ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'OTHER'];
   const palette = ['#c5cee2', '#7e89bc', '#d59b2b', '#d74c78', '#506eff', '#9573c9', '#68758c'];
   const put = (node, value) => locale.text(node, value, () => state.dataEpoch);

@@ -9,6 +9,7 @@ import { digest } from './store.mjs';
 import { createLifecycle } from './lifecycle.mjs';
 import { freezeAdapterStatus, UNAVAILABLE_ADAPTER_STATUS } from './adapter-preflight.mjs';
 import { mountAdmin } from './admin.mjs';
+import { mountVoice } from './voice.mjs';
 
 const safeCode = (value, fallback = 'INTEGRATION_UNAVAILABLE') =>
   typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : fallback;
@@ -27,7 +28,7 @@ function checkSignature(wallet, message, encoded) {
     return verify(null, Buffer.from(message, 'utf8'), key, bytes);
   } catch { return false; }
 }
-export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness, lifecycle: suppliedLifecycle, observeRequest, telemetry, adminReader, adapterStatus: suppliedAdapterStatus }) {
+export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness, lifecycle: suppliedLifecycle, observeRequest, telemetry, adminReader, voiceProvider, voiceRepo, adapterStatus: suppliedAdapterStatus }) {
   if (config.network !== DEVNET) fail('DEVNET_ONLY', 500);
   const app = express(), expectedHost = new URL(config.origin).host;
   // Unknown local capability is never silently promoted to ready. Direct
@@ -71,7 +72,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
-      'Permissions-Policy': 'camera=(), microphone=(), geolocation=()' });
+      'Permissions-Policy': 'camera=(), microphone=' + (config.voiceEnabled === true && config.voiceApiKey ? '(self)' : '()') + ', geolocation=()' });
     if (req.headers.host !== expectedHost) return next(new ServiceError('UNEXPECTED_HOST', 421));
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && req.headers.origin !== config.origin) {
       return next(new ServiceError('ORIGIN_REQUIRED', 403));
@@ -83,11 +84,6 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     }
     next();
   });
-  app.use('/api', express.json({ limit: '16kb', strict: true, type: 'application/json' }));
-  app.use('/api', (req, res, next) => {
-    if (!['GET', 'HEAD'].includes(req.method) && !req.is('application/json')) return next(new ServiceError('JSON_REQUIRED', 415));
-    next();
-  });
   const token = req => cookieValue(req.headers.cookie, config.cookieName);
   const auth = async req => {
     const session = await store.session(token(req));
@@ -95,6 +91,14 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     if (!session || !Number.isFinite(session.expires) || session.expires <= now()) fail('AUTHENTICATION_REQUIRED', 401);
     return session;
   };
+  // Only this fixed authenticated same-origin route reads bounded raw WAV.
+  // It must run before the ordinary 16KiB JSON parser and JSON-only guard.
+  mountVoice(routes, { config, auth, lifecycle, withOperation, repo: voiceRepo, provider: voiceProvider });
+  app.use('/api', express.json({ limit: '16kb', strict: true, type: 'application/json' }));
+  app.use('/api', (req, res, next) => {
+    if (!['GET', 'HEAD'].includes(req.method) && !req.is('application/json')) return next(new ServiceError('JSON_REQUIRED', 415));
+    next();
+  });
   const ready = async ledgerState => {
     try {
       const [state, ledger] = await Promise.all([gateway.readiness(), ledgerState ?? (runtimeReadiness ? runtimeReadiness() : { ready: true })]);
@@ -118,7 +122,8 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     res.json({ ready: state.ready && database, network: config.network, mode: 'devnet', databaseReady: database,
       paymentEnabled: config.paymentEnabled, merchantConfigured: Boolean(config.merchantPayTo),
       payer: state.payer, missing: [...new Set([...state.missing, ...(!config.merchantPayTo ? ['MERCHANT_PAY_TO'] : []), ...(!database ? ['DATABASE_CONNECTION'] : [])])],
-      modelConfigured: Boolean(config.model && config.apiKey), ...adapterStatus });
+      modelConfigured: Boolean(config.model && config.apiKey), voiceEnabled: config.voiceEnabled === true,
+      voiceConfigured: Boolean(config.voiceApiKey), ...adapterStatus });
   });
   routes.get('/api/session', async (req, res) => {
     const session = await auth(req); res.json({ wallet: session.wallet, expiresAt: new Date(session.expires).toISOString() });

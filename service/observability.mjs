@@ -12,6 +12,7 @@ const routes = new Map([
   ['/api/memories', 'memories'], ['/api/memories/:id', 'memory_detail'],
   ['/api/mandates', 'mandates'], ['/api/mandates/:id/revoke', 'mandate_revoke'],
   ...['access', 'overview', 'events', 'requests'].map(action => ['/api/admin/' + action, 'admin_' + action]),
+  ['/api/voice/capabilities', 'voice_capabilities'], ['/api/voice/transcriptions', 'voice_transcription'],
   ['/merchant/reports/:resourceId', 'merchant_report'],
 ]);
 const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);

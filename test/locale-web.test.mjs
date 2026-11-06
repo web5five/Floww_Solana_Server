@@ -98,13 +98,14 @@ test('guest locale toggle preserves exact draft, focus, selections, checkbox sta
   for (const [id, value] of Object.entries(values)) h.get(id).value = value;
   const input = h.get('message-text'); input.focus(); input.selectionStart = 2; input.selectionEnd = 6;
   h.get('approval-ack').checked = true; h.get('conversation-memory').checked = true;
-  const column = h.get('task-execution-column'), parent = column.parentNode, calls = h.calls.length, events = h.events.length;
+  const column = h.get('task-execution-column'), parent = column.parentNode, calls = h.calls.length, events = h.events.filter(e => e.type !== 'floww:locale').length;
   await switchTo(h, 'en'); await switchTo(h, 'ko');
   for (const [id, value] of Object.entries(values)) assert.equal(h.get(id).value, value, id);
   assert.equal(h.document.activeElement, input); assert.equal(input.selectionStart, 2); assert.equal(input.selectionEnd, 6);
   assert.equal(h.get('approval-ack').checked, true); assert.equal(h.get('conversation-memory').checked, true);
   assert.equal(h.get('task-execution-column'), column); assert.equal(column.parentNode, parent);
-  assert.equal(h.calls.length, calls); assert.equal(h.events.length, events);
+  assert.equal(h.calls.length, calls); assert.equal(h.events.filter(e => e.type !== 'floww:locale').length, events);
+  assert.deepEqual(h.events.filter(e => e.type === 'floww:locale').map(e => JSON.parse(JSON.stringify(e.detail))), [{ language: 'en' }, { language: 'ko' }]);
   assert.equal(h.backgroundErrors.length, 0);
 });
 

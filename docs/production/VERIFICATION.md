@@ -350,6 +350,61 @@ GWDC evidence directory. Actual operator access still needs a user-designated
 address and real wallet acceptance; no generated identity is promoted to that
 role. Exact head, required CI and merge binding are recorded with the release.
 
+## Complete voice implementation and engineering acceptance — 2026-11-07
+
+The controller reread the September30 original voice-screen and functional
+chat-microphone requests before selecting the profile in [VOICE.md](VOICE.md).
+Both surfaces share the existing conversation, draft and authority path. The
+full view offers an explicitly disclosed one-turn input→new answer→local
+playback cycle; the compact chat microphone remains review-first.
+
+- Final full Node suite: **585 passed, zero failed/skipped**, including required
+  isolated PostgreSQL checks. Independent final browser-client review/tests:
+  **264 passed, zero failed/skipped**. Syntax/whitespace/NFC checks cover101
+  files; workflow lint and Git whitespace checks pass. Python source is
+  unchanged from the earlier209-case pass and remains a required CI check.
+- The frozen backend's116-case targeted set and31 owned-PostgreSQL cases cover
+  byte-derived canonical WAV bounds, raw authentication before allocation,
+  durable atomic call/second quotas, actual provider-interface dispatch,
+  owner/revision/session fences, cancellation, drain and hung-work admission.
+  The independent24-case voice subset also passes. No managed DB schema,
+  existing restricted text credential or financial authority was changed.
+- Native IAB acceptance used a generated signed identity, actual HTTP and owned
+  file-SQLite, a real48kHz oscillator MediaStream, the shipped AudioWorklet and
+  native OfflineAudioContext resampling to16kHz. STT and text-model ports were
+  scripted. They do not establish actual microphone recognition or model quality.
+  With only the private fixture's wall stop extended to65s, the actual unchanged
+  processor sealed at60,000ms and1,920,044 canonical WAV bytes. HTTP returned200
+  into an editable transcript without automatically sending it.
+- Native KO/EN one-turn Start/Stop flows reached a new reply through the same
+  ordinary conversation path, with no intermediate Send or Speak click. The
+  selected local유나 andDaniel voices produced actual native `onstart`; KO also
+  reached `onend`, and EN after a scripted10s transcription delay accepted
+  explicit Stop and displayed stopped state. Queued synthesis alone was not
+  counted. Human audibility and real-provider performance remain unverified.
+- Cancel during delayed transcription cleared the UI and propagated through
+  actual HTTP transport to the scripted provider's abort signal. No cancelled
+  capture invoked refinement. Compact input appended to the exact existing
+  draft through explicit Use, closed the shared panel and did not send. A
+  controlled linked synthetic/partial Task projected its exact report over the
+  earlier plan, showed source/transfer caveats and allowed explicit local read.
+  Its stored payment/delivery markers are not settlement evidence.
+- Native acceptance found and fixed a new-conversation language reset, false
+  pending-request notice, stale playback status and mobile editor placement.
+  At390×844 the final editor occupies508–649px and Send692–738px; page width is
+  375/375px. The answer precedes optional recording/playback settings. Logout
+  removed private drafts, replies and transcript even from hidden DOM. The
+  viewport was reset and the temporary fixture tab closed. Across this final
+  QA process:6 scripted STT admissions,1 aborted,2 scripted refinements and
+  **zero external-provider or financial-port calls**.
+
+Final source hashes, sanitized HTTP/native observations, intermediate findings
+and desktop/mobile screenshots are retained outside Git in the local GWDC
+voice evidence directory. The complete voice acceptance gate stays open for a
+separately authorized Audio credential, real microphone input, actual STT and
+human-audible KO/EN replies. The code and default image keep voice off until
+explicitly configured. Actual image/CI evidence belongs to the exact PR head.
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

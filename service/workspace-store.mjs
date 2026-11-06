@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { fail, ServiceError } from './config.mjs';
 
 const KINDS = new Set(['conversation', 'memory']);
@@ -175,6 +175,66 @@ export class WorkspaceStore {
         }
       });
     } catch (error) { throw safe(error); }
+  }
+  async voiceContext(owner, id, expectedRevision) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) fail('INVALID_VOICE_REQUEST');
+    const record = await this.get(owner, 'conversation', id);
+    if (!Number.isSafeInteger(record.revision) || record.revision < 1) fail('WORKSPACE_UNAVAILABLE', 503);
+    if (record.revision !== expectedRevision) fail('WORKSPACE_CHANGED', 409);
+    const bound = this.pg ? (await this.store.query(`SELECT 1 FROM floww_runtime.tasks
+      WHERE id=$1 AND owner=$2 AND data#>>'{workspaceContext,conversationId}'=$1 LIMIT 1`, [id, owner])).rows.length > 0
+      : Boolean(this.store.db.prepare(`SELECT 1 FROM tasks WHERE id=? AND owner=?
+        AND json_extract(data,'$.workspaceContext.conversationId')=? LIMIT 1`).get(id, owner, id));
+    if (record.data.linkedTaskId || record.data.confirmation || bound) fail('CONVERSATION_ALREADY_LINKED', 409);
+    if (record.data.operation) {
+      if (!Number.isSafeInteger(record.data.operation.expiresAt)) fail('WORKSPACE_UNAVAILABLE', 503);
+      if (record.data.operation.expiresAt > this.clock()) fail('CONVERSATION_BUSY', 409);
+    }
+    return { id: record.id, revision: record.revision };
+  }
+  async reserveVoice(owner, seconds, { globalCalls = 30, ownerCalls = 10, globalSeconds = 600, ownerSeconds = 180 } = {}) {
+    if (typeof owner !== 'string' || !owner || owner.length > 160 || !Number.isSafeInteger(seconds) || seconds < 1 || seconds > 60 ||
+        !Number.isSafeInteger(globalCalls) || globalCalls < 1 || globalCalls > 1000 ||
+        !Number.isSafeInteger(ownerCalls) || ownerCalls < 1 || ownerCalls > globalCalls ||
+        !Number.isSafeInteger(globalSeconds) || globalSeconds < 1 || globalSeconds > 3600 ||
+        !Number.isSafeInteger(ownerSeconds) || ownerSeconds < 1 || ownerSeconds > globalSeconds) fail('INVALID_VOICE_REQUEST');
+    const day = new Date(this.clock()).toISOString().slice(0, 10), prefix = 'voice:v1:' + day;
+    const ownerDigest = createHash('sha256').update(owner).digest('hex');
+    const buckets = [prefix + ':global:calls', prefix + ':owner:' + ownerDigest + ':calls',
+      prefix + ':global:seconds', prefix + ':owner:' + ownerDigest + ':seconds'];
+    const increments = [1, 1, seconds, seconds], limits = [globalCalls, ownerCalls, globalSeconds, ownerSeconds];
+    const used = value => {
+      if (value === undefined) return 0;
+      if (typeof value === 'string' && /^(0|[1-9][0-9]{0,15})$/.test(value)) value = Number(value);
+      if (!Number.isSafeInteger(value) || value < 0) fail('VOICE_QUOTA_UNAVAILABLE', 503);
+      return value;
+    };
+    try {
+      if (this.pg) return await this.store.transaction(async client => {
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))', ['workspace-voice:v1:' + day]);
+        const values = [];
+        for (let i = 0; i < buckets.length; i++) {
+          const rows = await client.query('SELECT used FROM floww_runtime.workspace_model_usage WHERE bucket=$1 FOR UPDATE', [buckets[i]]);
+          const prior = used(rows.rows[0]?.used);
+          if (prior > limits[i] - increments[i]) fail('VOICE_DAILY_LIMIT', 429);
+          values.push(prior + increments[i]);
+        }
+        for (let i = 0; i < buckets.length; i++) await client.query(`INSERT INTO floww_runtime.workspace_model_usage(bucket,used) VALUES($1,$2)
+          ON CONFLICT(bucket) DO UPDATE SET used=EXCLUDED.used`, [buckets[i], values[i]]);
+      });
+      return this.store.transaction(() => {
+        const values = buckets.map((bucket, i) => {
+          const prior = used(this.store.db.prepare('SELECT used FROM workspace_model_usage WHERE bucket=?').get(bucket)?.used);
+          if (prior > limits[i] - increments[i]) fail('VOICE_DAILY_LIMIT', 429);
+          return prior + increments[i];
+        });
+        for (let i = 0; i < buckets.length; i++) this.store.db.prepare(`INSERT INTO workspace_model_usage(bucket,used) VALUES(?,?)
+          ON CONFLICT(bucket) DO UPDATE SET used=excluded.used`).run(buckets[i], values[i]);
+      });
+    } catch (error) {
+      if (error instanceof ServiceError && ['VOICE_DAILY_LIMIT', 'VOICE_QUOTA_UNAVAILABLE'].includes(error.code)) throw error;
+      fail('VOICE_QUOTA_UNAVAILABLE', 503);
+    }
   }
   async page(owner, kind, { limit = 20, cursor } = {}) {
     check(owner, kind);

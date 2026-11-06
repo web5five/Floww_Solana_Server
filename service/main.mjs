@@ -15,6 +15,7 @@ import { createMandateService } from './mandates.mjs';
 import { createRequestTelemetry } from './observability.mjs';
 import { createShutdown } from './lifecycle.mjs';
 import { checkPythonAdapters, freezeAdapterStatus } from './adapter-preflight.mjs';
+import { createVoiceTranscriber } from './voice-provider.mjs';
 
 export function readPayerKey(path) {
   let fd;
@@ -54,7 +55,9 @@ export async function buildRuntime(input = {}) {
   const workspace = await WorkspaceStore.open(store);
   const mandates = await createMandateService({ store, config });
   const telemetry = createRequestTelemetry({ write: input.writeLog });
-  const app = createApp({ config, store, gateway, reportProvider, ai, adapterStatus, telemetry, mountMerchant: input.mountMerchant ?? mountMerchant,
+  const voiceProvider = input.voiceProvider ?? (config.voiceEnabled && config.voiceApiKey ? createVoiceTranscriber({ apiKey: config.voiceApiKey,
+    timeoutMs: config.voiceProviderTimeoutMs ?? 20_000 }) : null);
+  const app = createApp({ config, store, gateway, reportProvider, ai, adapterStatus, telemetry, voiceProvider, voiceRepo: workspace, mountMerchant: input.mountMerchant ?? mountMerchant,
     observeRequest: input.observeRequest ?? telemetry.observeRequest,
     mountWorkspace: (app, context) => mountWorkspace(app, { repo: workspace, planner, mandates }, context),
     runtimeReadiness: () => mandates.readiness(),
@@ -64,7 +67,7 @@ export async function buildRuntime(input = {}) {
       observed: ({ task, owner }) => mandates.observe(owner, task),
     },
   });
-  return { app, config, store, gateway, reportProvider, ai, planner, workspace, mandates, telemetry, adapterStatus: app.locals.adapterStatus, lifecycle: app.locals.lifecycle };
+  return { app, config, store, gateway, reportProvider, ai, planner, workspace, mandates, telemetry, voiceProvider, adapterStatus: app.locals.adapterStatus, lifecycle: app.locals.lifecycle };
 }
 export async function start(input = {}) {
   const runtime = await buildRuntime(input);

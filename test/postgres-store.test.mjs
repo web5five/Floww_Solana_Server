@@ -522,3 +522,46 @@ real('PostgreSQL actual slow read is cancelled by the owned statement budget and
   assert.equal(result.usage.status, 'ready'); assert.equal(result.executions.status, 'ready'); assert.equal(result.events.status, 'ready');
   assert.equal(releases, 1); assert.ok(performance.now() - started >= 700); assert.ok(performance.now() - started < 1900);
 });
+real('PostgreSQL voice quotas atomically cap independent pools and never touch model role admissions', async () => {
+  now = Math.floor(now / 86_400_000) * 86_400_000 + 86_400_000;
+  const a = await WorkspaceStore.open(first), b = await WorkspaceStore.open(second), owners = [owner(), owner()];
+  const limits = { globalCalls: 3, ownerCalls: 2, globalSeconds: 3, ownerSeconds: 2 };
+  const results = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => (i % 2 ? a : b).reserveVoice(owners[i < 4 ? 0 : 1], 1, limits)));
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 3);
+  assert.ok(results.filter(result => result.status === 'rejected').every(result => result.reason.code === 'VOICE_DAILY_LIMIT'));
+  const day = new Date(now).toISOString().slice(0, 10), prefix = 'voice:v1:' + day;
+  const rows = (await first.pool.query('SELECT bucket,used FROM floww_runtime.workspace_model_usage WHERE bucket LIKE $1 ORDER BY bucket', [prefix + ':%'])).rows;
+  assert.equal(rows.find(row => row.bucket === prefix + ':global:calls').used, '3');
+  assert.equal(rows.find(row => row.bucket === prefix + ':global:seconds').used, '3');
+  assert.ok(rows.filter(row => row.bucket.includes(':owner:')).every(row => Number(row.used) <= 2));
+  assert.equal((await first.pool.query('SELECT count(*) AS n FROM floww_runtime.workspace_model_usage WHERE bucket=$1', [day + ':global'])).rows[0].n, '0');
+  const reopened = await PostgresStore.open(cluster.url, { clock });
+  try { await assert.rejects((await WorkspaceStore.open(reopened)).reserveVoice(owner(), 1, limits), { code: 'VOICE_DAILY_LIMIT' }); }
+  finally { await reopened.close(); }
+});
+real('PostgreSQL corrupted voice counters fail closed with no partial admissions', async () => {
+  now = Math.floor(now / 86_400_000) * 86_400_000 + 86_400_000;
+  const repo = await WorkspaceStore.open(first), wallet = owner(); await repo.reserveVoice(wallet, 1);
+  const prefix = 'voice:v1:' + new Date(now).toISOString().slice(0, 10), bucket = prefix + ':global:seconds';
+  for (const used of ['-1', '9007199254740992']) {
+    await first.pool.query('UPDATE floww_runtime.workspace_model_usage SET used=$1 WHERE bucket=$2', [used, bucket]);
+    const before = (await first.pool.query('SELECT bucket,used FROM floww_runtime.workspace_model_usage WHERE bucket LIKE $1 ORDER BY bucket', [prefix + ':%'])).rows;
+    await assert.rejects(repo.reserveVoice(wallet, 1), { code: 'VOICE_QUOTA_UNAVAILABLE' });
+    assert.deepEqual((await first.pool.query('SELECT bucket,used FROM floww_runtime.workspace_model_usage WHERE bucket LIKE $1 ORDER BY bucket', [prefix + ':%'])).rows, before);
+  }
+});
+real('PostgreSQL voice context protects ownership/revision/linking without financial lease normalization', async () => {
+  const repo = await WorkspaceStore.open(first), wallet = owner();
+  const record = await repo.create(wallet, 'conversation', { title: 'Voice context', status: 'CLARIFICATION_REQUIRED', messages: [],
+    requests: [], linkedTaskId: null, confirmation: null, operation: null });
+  assert.deepEqual(await repo.voiceContext(wallet, record.id, 1), { id: record.id, revision: 1 });
+  await assert.rejects(repo.voiceContext(owner(), record.id, 1), { code: 'WORKSPACE_NOT_FOUND' });
+  await assert.rejects(repo.voiceContext(wallet, record.id, 2), { code: 'WORKSPACE_CHANGED' });
+  const value = task(wallet); value.id = record.id; value.payment = 'SIGNING'; value.operation = { id: randomUUID(), expiresAt: 1 };
+  value.workspaceContext = { conversationId: record.id }; await first.add(value);
+  const before = (await first.pool.query('SELECT revision,data FROM floww_runtime.tasks WHERE id=$1', [value.id])).rows;
+  await assert.rejects(repo.voiceContext(wallet, record.id, 1), { code: 'CONVERSATION_ALREADY_LINKED' });
+  assert.deepEqual((await first.pool.query('SELECT revision,data FROM floww_runtime.tasks WHERE id=$1', [value.id])).rows, before);
+  await first.pool.query('UPDATE floww_runtime.workspace_records SET revision=$1 WHERE id=$2', ['9007199254740992', record.id]);
+  await assert.rejects(repo.voiceContext(wallet, record.id, 1), { code: 'WORKSPACE_UNAVAILABLE' });
+});
