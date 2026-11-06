@@ -2,6 +2,97 @@
 (() => {
   'use strict';
   const COPY = {
+  "voice.modeOptions": ["음성 대화 방식 선택", "Choose a voice interaction"],
+  "voice.mode": ["이번에 사용할 방식", "Mode for this turn"],
+  "voice.reviewMode": ["글을 검토한 뒤 직접 보내기", "Review text before sending"],
+  "voice.turnMode": ["한 번 말하고 답변 듣기", "Say one turn and hear the answer"],
+  "voice.turnStart": ["한 번 말하고 답변 듣기", "Start one spoken turn"],
+  "voice.turnConsent": ["이번 한 번의 변환·전송·답변 읽기에 동의합니다.", "I agree to transcribe, send and read the answer for this one turn."],
+  "voice.turnDisclosure": ["녹음 중지 또는60초 제한 시 같은 대화로 한 번 보내고, 새 답변을 {voice} · {language}로 읽습니다. 마이크는 꺼집니다.", "Stop or the60-second limit sends this utterance once to the same assistant and reads its new answer with {voice} · {language}. The microphone then stays off."],
+  "voice.turnDraftBlocked": ["기존 입력이 있어 글을 검토한 뒤 보내는 방식을 사용합니다. 기존 글은 유지됩니다.", "A typed draft is already present. Use review-first mode so it remains under your control."],
+  "voice.turnSending": ["같은 대화로 이번 말을 보내고 있습니다.", "Sending this utterance to the same conversation."],
+  "voice.turnStopped": ["읽기와 다음 동작을 중지했습니다. 요청한 전송은 현재 대화에서 확인해 주세요.", "Playback and follow-up stopped. Check the issued message in the current conversation."],
+  "voice.turnVoiceRequired": ["이번 답변을 읽을 언어와 이 기기의 음성을 먼저 선택해 주세요.", "Choose this turn’s reading language and an on-device voice first."],
+
+  "voice.disclosureShort": ["녹음을 중지하면 음성을 OpenAI에 보내 글로 변환합니다.", "After Stop, audio is sent to OpenAI for transcription."],
+  "voice.privacy": ["음성과 텍스트 처리 안내", "How audio and text are processed"],
+  "voice.readyTitle": ["음성 입력", "Voice input"],
+  "voice.listeningTitle": ["듣고 있습니다", "Listening"],
+  "voice.transcribingTitle": ["글로 바꾸고 있습니다", "Transcribing"],
+  "voice.reviewTitle": ["보낼 글을 확인해 주세요", "Review your text"],
+  "voice.readStopped": ["음성 읽기를 중지했습니다.", "Spoken playback stopped."],
+  "voice.readFinished": ["이 응답의 음성 읽기를 마쳤습니다.", "Finished reading this answer."],
+  "voice.recordAgain": ["다시 녹음하기", "Record again"],
+  "voice.turnAssistantUnavailable": ["지금은 AI 답변을 준비할 수 없습니다. 글을 검토하는 방식으로 입력을 이어갈 수 있습니다.", "The assistant cannot prepare an answer right now. You can continue with review-first input."],
+  "voice.turnModeSummary": ["한 번 대화 · {language} · {voice}", "One spoken turn · {language} · {voice}"],
+  "voice.transferCaution": ["이체 내역은 지갑 잔액이나 수익을 뜻하지 않습니다.", "Observed transfers do not establish wallet balances or profit."],
+  "voice.nextTurn": ["다음 말을 이어갈까요?", "Continue with another turn?"],
+  "voice.reportPending": ["연결된 작업의 결과를 아직 읽을 수 없습니다. 현재 작업 상태를 화면에서 확인해 주세요.", "The linked task report is not available to read yet. Check the current task on screen."],
+  "voice.readStarting": ["선택한 기기 음성으로 읽기를 준비하고 있습니다.", "Preparing playback with the selected on-device voice."],
+  "voice.nav": ["음성으로 대화", "Voice conversation"],
+  "voice.eyebrow": ["말로 이어가는 같은 대화", "THE SAME CONVERSATION, BY VOICE"],
+  "voice.title": ["이제, 목소리로 이어가요.", "Continue with your voice."],
+  "voice.description": ["말을 글로 확인하고 같은 요청과 답변을 이어갑니다.", "Review what you said, then continue the same request and answer."],
+  "voice.mic": ["음성 입력 열기", "Open voice input"],
+  "voice.continue": ["채팅에서 이어가기", "Continue in chat"],
+  "voice.close": ["음성 입력 닫기", "Close voice input"],
+  "voice.ready": ["편하게 말씀해 주세요", "Say what you need"],
+  "voice.level": ["현재 마이크 입력", "Current microphone input"],
+  "voice.disclosure": ["녹음을 멈추면 음성을 OpenAI에 보내 글로 변환합니다. Floww는 녹음 파일을 대화에 첨부하지 않습니다. 전사문은 검토 후 직접 보낼 때 대화에 저장됩니다.", "After Stop, audio is sent to OpenAI for transcription. Floww does not attach recordings to the conversation. Only the reviewed text enters it when you explicitly send."],
+  "voice.consent": ["이번 녹음의 음성 변환에 동의합니다.", "I agree to transcribe this recording."],
+  "voice.start": ["녹음 시작", "Start recording"],
+  "voice.stop": ["녹음 중지", "Stop recording"],
+  "voice.cancel": ["취소", "Cancel"],
+  "voice.login": ["지갑 연결", "Connect wallet"],
+  "voice.transcript": ["인식된 말 · 편집 가능", "Recognized speech · editable"],
+  "voice.original": ["보관 중인 기존 입력", "Your existing draft is preserved"],
+  "voice.rebase": ["현재 입력과 다시 검토", "Review with the current draft"],
+  "voice.preview": ["보낼 내용 미리 보기", "Preview what will be sent"],
+  "voice.send": ["검토한 내용 보내기", "Send reviewed text"],
+  "voice.appendSend": ["기존 입력에 덧붙여 보내기", "Append to draft and send"],
+  "voice.use": ["채팅 입력에 넣기", "Use in chat draft"],
+  "voice.appendUse": ["기존 입력 뒤에 넣기", "Append to chat draft"],
+  "voice.answer": ["Floww의 답변", "Floww’s answer"],
+  "voice.readLanguage": ["읽을 언어 직접 선택", "Choose the reading language"],
+  "voice.chooseLanguage": ["언어를 선택해 주세요", "Choose a language"],
+  "voice.korean": ["한국어", "Korean"],
+  "voice.english": ["영어", "English"],
+  "voice.readVoice": ["이 기기의 음성", "Voice on this device"],
+  "voice.speak": ["이 응답 읽기", "Read this answer"],
+  "voice.stopSpeaking": ["읽기 중지", "Stop reading"],
+  "voice.linked": ["확정된 작업의 조건은 화면에서 확인합니다. 새 목적은 새 대화에서 시작해 주세요.", "Review the confirmed task on screen. Start a new conversation for a new purpose."],
+  "voice.newContext": ["새 요청의 입력을 준비합니다", "Preparing input for a new request"],
+  "voice.checking": ["음성 입력 설정을 확인하고 있습니다.", "Checking voice input configuration."],
+  "voice.configured": ["녹음 시작을 선택하면 마이크 사용 여부를 확인합니다.", "Select Start recording to choose whether to allow the microphone."],
+  "voice.unavailable": ["음성 입력을 아직 사용할 수 없습니다. 입력한 글은 그대로 이어갈 수 있습니다.", "Voice input is unavailable. You can continue with your typed draft."],
+  "voice.guest": ["먼저 지갑을 연결해 주세요. 로그인 후 녹음 시작을 직접 선택합니다.", "Connect your wallet first, then explicitly start recording."],
+  "voice.unsupported": ["이 브라우저에서 안전한 음성 녹음을 준비하지 못했습니다. 글로 계속 입력할 수 있습니다.", "This browser could not prepare safe audio capture. You can continue typing."],
+  "voice.permission": ["마이크 사용 여부를 선택해 주세요. 취소해도 기존 입력은 유지됩니다.", "Choose whether to allow the microphone. Cancel keeps your existing draft."],
+  "voice.ensuring": ["같은 대화에 음성 입력을 연결하고 있습니다.", "Binding voice input to the same conversation."],
+  "voice.listening": ["듣고 있습니다. 끝나면 녹음 중지를 선택해 주세요.", "Listening. Select Stop recording when you finish."],
+  "voice.transcribing": ["녹음을 끝냈습니다. 글로 변환하고 있습니다.", "Recording has ended. Transcribing your speech."],
+  "voice.review": ["글을 확인하고 직접 보내 주세요. 아직 대화에는 보내지 않았습니다.", "Review and explicitly send the text. It has not been sent to the conversation."],
+  "voice.sending": ["같은 대화로 보내고 있습니다.", "Sending through the same conversation."],
+  "voice.sent": ["현재 대화의 응답과 진행 상태를 확인해 주세요.", "Review the answer and current state of this conversation."],
+  "voice.notSent": ["요청의 현재 상태를 확인해 주세요. 새 음성을 반복해서 보내지 마세요.", "Check the current request state before sending more speech."],
+  "voice.cancelled": ["음성 입력을 취소했습니다. 기존 입력은 유지됩니다.", "Voice input cancelled. Your existing draft is preserved."],
+  "voice.interrupted": ["녹음과 읽기를 중지했습니다. 글을 확인한 뒤 다시 시작할 수 있습니다.", "Recording and playback stopped. Review your text before starting again."],
+  "voice.contextChanged": ["대화나 조회 범위가 바뀌었습니다. 현재 입력을 확인한 뒤 다시 검토해 주세요.", "The conversation or scope changed. Check the current draft and review again."],
+  "voice.draftChanged": ["기존 입력이 바뀌어 덧붙이지 않았습니다. 두 내용을 확인한 뒤 다시 검토해 주세요.", "Your draft changed, so nothing was appended. Review both texts before continuing."],
+  "voice.tooLong": ["기존 입력과 합친 글이 2,000자를 넘습니다. 내용을 줄여 주세요.", "The combined text exceeds2,000 characters. Shorten it before continuing."],
+  "voice.length": ["보낼 글 {count} / 2,000자", "Text to send: {count} / 2,000 characters"],
+  "voice.empty": ["인식된 말이 없습니다. 글을 입력하거나 다시 녹음해 주세요.", "No speech was recognized. Type or explicitly record again."],
+  "voice.failed": ["음성을 변환하지 못했습니다. 입력은 유지됩니다. 필요하면 새 녹음을 직접 시작해 주세요.", "Transcription could not be completed. Your draft is preserved. Explicitly start a new recording if needed."],
+  "voice.denied": ["마이크 사용이 허용되지 않았습니다. 브라우저 설정을 확인하거나 글로 입력해 주세요.", "Microphone access was not allowed. Check browser settings or continue typing."],
+  "voice.noDevice": ["사용할 마이크를 찾지 못했습니다. 연결을 확인하거나 글로 입력해 주세요.", "No microphone was found. Check the device or continue typing."],
+  "voice.limit": ["오늘의 음성 요청 한도에 도달했습니다. 글로 계속 입력할 수 있습니다.", "The daily voice admission limit has been reached. You can continue typing."],
+  "voice.consentNeeded": ["이번 녹음의 변환에 동의한 뒤 시작해 주세요.", "Agree to transcription for this recording before starting."],
+  "voice.speaking": ["선택한 기기 음성으로 읽고 있습니다.", "Reading with the selected on-device voice."],
+  "voice.localVoice": ["기기에서 제공하는 음성으로 읽습니다. 응답의 언어를 직접 확인해 주세요.", "Uses an on-device voice. Explicitly check the language of the answer."],
+  "voice.noLocalVoice": ["선택한 언어의 기기 음성을 확인하지 못했습니다. 응답은 글로 볼 수 있습니다.", "No on-device voice was verified for that language. The answer remains available as text."],
+  "voice.speechFailed": ["음성 읽기를 확인하지 못했습니다. 응답은 글로 볼 수 있습니다.", "Spoken playback could not be confirmed. The answer remains available as text."],
+  "voice.noNewReply": ["새 응답을 확인하지 못했습니다. 이전 응답을 새 답변으로 읽지 않습니다.", "No new answer was confirmed. An older answer is not presented as a new reply."],
+
   "admin.currentPolicy": ["현재 권한", "Current policy"],
   "admin.currentPayment": ["현재 결제", "Current payment"],
   "admin.currentDelivery": ["현재 전달", "Current delivery"],
@@ -2450,6 +2541,10 @@
       return template.replace(/\{([A-Za-z]+)\}/g, (_, name) => resolve(parameters[name]));
     } });
   }
+  function copyInLanguage(selectedLanguage, key, parameters = {}) {
+    if (!supported(selectedLanguage) || !Object.hasOwn(COPY, key)) throw new Error('UNKNOWN_AUTHORED_COPY');
+    return COPY[key][selectedLanguage === 'ko' ? 0 : 1].replace(/\{([A-Za-z]+)\}/g, (_, name) => resolve(parameters[name]));
+  }
   function apply(node, attribute, binding) {
     // A binding created for a previous wallet/session cannot reintroduce its
     // private text after logout, even if the same leaf node is reused.
@@ -2485,7 +2580,7 @@
     if (!supported(value)) return false;
     language = value;
     try { window.localStorage?.setItem(STORAGE_KEY, value); } catch { /* optional preference */ }
-    refresh(); return true;
+    refresh(); window.dispatchEvent(new CustomEvent('floww:locale', { detail: { language } })); return true;
   }
   function date(value) {
     if (!Number.isFinite(Date.parse(value))) return String(copy('시간 확인 필요'));
@@ -2493,7 +2588,7 @@
       month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     }).format(new Date(value));
   }
-  window.FlowwLocale = Object.freeze({ copy, text, attr, date, setLanguage, get language() { return language; } });
+  window.FlowwLocale = Object.freeze({ copy, copyInLanguage, text, attr, date, setLanguage, get language() { return language; } });
   // This one-time bootstrap visits only explicitly authored copy leaves and
   // attributes. Locale changes never rescan arbitrary DOM text or input values.
   for (const node of document.querySelectorAll('[data-copy]')) text(node, copy(node.getAttribute('data-copy')));

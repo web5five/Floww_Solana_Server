@@ -51,7 +51,7 @@ of security certification, accessibility conformance or a contractual SLA.
 ## Current iteration evidence
 
 The table's starting checkpoint is historical, not a list of features still
-absent. Released main `8a1ee3f` includes the reviewed PR11–15 changes:
+absent. Released main `4e21fa1` includes the reviewed PR11–16 changes:
 
 - P03–P06: dedicated DB/ledger readiness, bounded HTTP shutdown, merchant replay
   admission and redacted fixed-label diagnostics have implementation and
@@ -60,7 +60,7 @@ absent. Released main `8a1ee3f` includes the reviewed PR11–15 changes:
   versioned scripted journey cases and purpose-led desktop/tablet/phone design
   are verified within the boundaries below. Voice, full keyboard/zoom coverage,
   actual-model quality and funded completion remain open.
-- P10: [PR15's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42254690342)
+- P10: [PR16's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42266339473)
   passed both required PostgreSQL/runtime/Python checks and an actual non-root,
   network-isolated image check. It did not deploy a public service.
 
@@ -109,6 +109,12 @@ Its default administrator list remains empty; generated test identities do not
 establish actual operator access. [ADMIN.md](ADMIN.md) defines the data and live
 enablement boundary. [VOICE.md](VOICE.md) preserves the complete original voice
 scope and its still-open microphone/provider acceptance.
+
+The voice implementation profile uses bounded recorded transcription with the
+current [file-transcription model](https://developers.openai.com/api/docs/guides/speech-to-text)
+and verified-local device playback. [VOICE.md](VOICE.md) records the complete
+two-surface contract and the remaining actual microphone/provider/audibility
+gates. Local voice inventory is capability evidence, not completed speech.
 
 The adapter follow-up adds one bounded, cached offline packaging check for the
 configured Python workspace/report adapters. Known failure blocks new model

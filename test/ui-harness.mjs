@@ -5,6 +5,9 @@ import vm from 'node:vm';
 const base = new URL('../service/web/', import.meta.url);
 const html = await readFile(new URL('index.html', base), 'utf8');
 const client = await readFile(new URL('workspace-client.js', base), 'utf8');
+const voiceClient = await readFile(new URL('voice-client.js', base), 'utf8');
+const voiceAudio = await readFile(new URL('voice-audio.js', base), 'utf8');
+const voiceWorklet = await readFile(new URL('voice-worklet.js', base), 'utf8');
 const adminClient = await readFile(new URL('admin-client.js', base), 'utf8');
 const taskClient = await readFile(new URL('app.js', base), 'utf8');
 const units = await readFile(new URL('units.js', base), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
@@ -23,8 +26,8 @@ async function until(check) {
 // Execute the unmodified browser clients with inert DOM primitives. These tests
 // exercise request ordering, public events and visible text; they do not assert
 // implementation source strings, claim layout coverage, or contact a network.
-function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageDenied = false, hash = '' } = {}) {
-  const nodes = [], ids = new Map(), intervals = new Map(), windowEvents = new Map(), events = [], backgroundErrors = [], downloads = [], blobs = new Map(); let timerId = 0;
+function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageDenied = false, hash = '', browser = {} } = {}) {
+  const nodes = [], ids = new Map(), intervals = new Map(), timeouts = new Map(), windowEvents = new Map(), events = [], backgroundErrors = [], downloads = [], blobs = new Map(); let timerId = 0;
   const dataKey = key => key.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
   class Node {
     constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {};
@@ -120,7 +123,9 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
     const descendants = []; const visit = node => { for (const child of node.children) if (typeof child === 'object') { descendants.push(child); visit(child); } }; visit(scope);
     return descendants.filter(node => selector.split(',').some(part => matches(node, part)));
   }
-  const document = { hidden: false, body: nodes.find(node => node.tagName === 'BODY'), documentElement: nodes.find(node => node.tagName === 'HTML'), activeElement: null,
+  const documentEvents = new Map();
+  const document = { addEventListener(type, fn) { const values = documentEvents.get(type) ?? []; values.push(fn); documentEvents.set(type, values); },
+    dispatchEvent(event) { for (const fn of documentEvents.get(event.type) ?? []) fn(event); return true; }, hidden: false, body: nodes.find(node => node.tagName === 'BODY'), documentElement: nodes.find(node => node.tagName === 'HTML'), activeElement: null,
     getElementById: id => ids.get(id) ?? null, createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag),
     querySelectorAll: selector => select(root, selector), querySelector: selector => select(root, selector)[0] ?? null };
   class Event { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } }
@@ -152,19 +157,22 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
     getItem(key) { if (storageDenied) throw new Error('Storage unavailable'); return storage.get(key) ?? null; },
     setItem(key, value) { if (storageDenied) throw new Error('Storage unavailable'); storageWrites.push([key, String(value)]); storage.set(key, String(value)); },
   };
+  Object.assign(window, browser, { navigator: { ...window.navigator, ...browser.navigator } });
   const calls = [];
   class BrowserURL extends URL {
     static createObjectURL(blob) { const key = 'blob:scripted-ui-' + blobs.size; blobs.set(key, blob); return key; }
     static revokeObjectURL(key) { blobs.delete(key); }
   }
   const context = { document, window, CustomEvent: Event, Option: function Option(text, value) { const n = new Node('option'); n.textContent = text; n.value = value; return n; },
-    fetch: async (url, options) => { const call = { url: String(url), ...options, body: options?.body ? JSON.parse(options.body) : undefined }; calls.push(call); return fetcher(call); },
+    fetch: async (url, options) => { const call = { url: String(url), ...options, body: options?.body ? (typeof options.body === 'string' ? JSON.parse(options.body) : options.body) : undefined }; calls.push(call); return fetcher(call); },
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; }, clearInterval(id) { intervals.delete(id); },
-    setTimeout() { return ++timerId; }, clearTimeout() {}, AbortController, URL: BrowserURL, URLSearchParams, Intl, Date,
-    TextEncoder, Uint8Array, Blob, btoa, queueMicrotask, crypto: globalThis.crypto };
+    setTimeout(fn, ms) { const id = ++timerId; timeouts.set(id, { fn, ms }); return id; }, clearTimeout(id) { timeouts.delete(id); }, AbortController, URL: BrowserURL, URLSearchParams, Intl, Date,
+    TextEncoder, Uint8Array, Float32Array, DataView, Blob, btoa, queueMicrotask, crypto: globalThis.crypto };
   vm.runInNewContext(units + '\n' + locale + '\n' + source, context, { filename: 'browser-client-under-test.js' });
   return { document, window, nodes, calls, intervals, events, backgroundErrors, get: id => ids.get(id),
-    storage, storageWrites, downloads, historyEntries, historyWrites,
+    storage, storageWrites, downloads, historyEntries, historyWrites, timeouts,
+    runTimeout(ms) { for (const [id, timer] of [...timeouts]) if (timer.ms === ms) { timeouts.delete(id); timer.fn(); } },
+    emitDocument(type, extra = {}) { document.dispatchEvent({ type, ...extra }); },
     emit(type, detail) { window.dispatchEvent(new Event(type, { detail })); },
     // Existing healthy scripted fixtures explicitly supply their local adapter
     // capabilities. Unknown/malformed health tests use real /api/health payloads
@@ -191,4 +199,4 @@ function conversation(id, owner, withPlan = true) {
       limitations: ['Scripted local behavior only'], modelVersion: 'scripted-test' } : null };
 }
 
-export { harness, html, client, taskClient, adminClient, units, A, B, TASK_A, TASK_B, CONVERSATION_A, CONVERSATION_B, deferred, response, settle, until, task, overview, conversation };
+export { harness, html, client, taskClient, adminClient, voiceClient, voiceAudio, voiceWorklet, units, A, B, TASK_A, TASK_B, CONVERSATION_A, CONVERSATION_B, deferred, response, settle, until, task, overview, conversation };

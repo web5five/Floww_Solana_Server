@@ -8,7 +8,8 @@
     route: null, routeVersion: 0, routeLoading: false, runToken: null, sessionGeneration: null, pendingFocus: null, draftBinding: 'new', journeyLinksSignature: null };
   // Drafts are ephemeral and bound to this authenticated owner. URLs and browser
   // history contain only allowlisted view names and opaque record IDs.
-  const drafts = new Map();
+  const drafts = new Map(), voiceLeases = new WeakMap(), voiceListeners = new Set();
+  let voiceEnsureFlight = null;
   const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
   const steps = ['request', 'plan', 'payment', 'result'];
   const locale = window.FlowwLocale, authored = locale.copy;
@@ -21,6 +22,7 @@
     memory: [authored('YOUR CONTEXT'), authored('다음 대화에도 이어질 맥락.'), authored('직접 저장한 선호를 관리하고 대화마다 사용 여부를 정하세요.')],
     budgets: [authored('BOUNDED AUTHORITY'), authored('한도를 정하고, 흐름을 살피세요.'), authored('목적에 맞는 예산 권한과 예약·사용 내역을 확인하세요.')],
     activity: [authored('WORKSPACE ACTIVITY'), authored('변경의 흐름을 한눈에.'), authored('내 대화와 기억이 바뀐 시점을 확인하세요.')],
+    voice: [authored('voice.eyebrow'), authored('voice.title'), authored('voice.description')],
     admin: [authored('admin.eyebrow'), authored('admin.overview'), authored('admin.description')],
   };
   const statuses = { CLARIFICATION_REQUIRED: authored('추가 정보 필요'), READY_TO_PLAN: authored('계획 작성 가능'), UNSUPPORTED: authored('범위 확인 필요'),
@@ -208,11 +210,12 @@
   }
   function controls() {
     const doing = state.busy || state.taskBusy || state.routeLoading, locked = !state.wallet || doing;
-    const taskControl = node => { for (let p = node; p; p = p.parentNode) if (p.id === 'task-execution-column') return true; return false; };
+    const taskControl = node => { for (let p = node; p; p = p.parentNode) if (p.id === 'task-execution-column' || p.id === 'voice-panel') return true; return false; };
     // The mounted task keeps its own exact-quote/health/expiry controls.
-    for (const input of document.querySelectorAll('[data-page]:not([data-page=tasks]):not([data-page=admin]) input,[data-page]:not([data-page=tasks]):not([data-page=admin]) textarea,[data-page]:not([data-page=tasks]):not([data-page=admin]) select')) if (!taskControl(input)) input.disabled = locked;
-    for (const b of document.querySelectorAll('[data-page]:not([data-page=tasks]):not([data-page=admin]) button:not([data-go])')) if (!taskControl(b)) b.disabled = locked;
+    for (const input of document.querySelectorAll('[data-page]:not([data-page=tasks]):not([data-page=admin]):not([data-page=voice]) input,[data-page]:not([data-page=tasks]):not([data-page=admin]):not([data-page=voice]) textarea,[data-page]:not([data-page=tasks]):not([data-page=admin]):not([data-page=voice]) select')) if (!taskControl(input)) input.disabled = locked;
+    for (const b of document.querySelectorAll('[data-page]:not([data-page=tasks]):not([data-page=admin]):not([data-page=voice]) button:not([data-go])')) if (!taskControl(b)) b.disabled = locked;
     const c = state.conversation, immutable = Boolean(c?.linkedTaskId || c?.planLocked || c?.working), blocked = workspaceBlock();
+    $('voice-launch').disabled = doing;
     $('send-message').disabled = doing || immutable || !state.authReady || Boolean(state.wallet && blocked); $('message-text').disabled = doing || immutable;
     put($('send-message'), () => !state.authReady ? authored('연결 확인 중…') : !state.wallet ? authored(blocked ? '지갑 연결' : '지갑 연결하고 시작') : blocked ? authored(blocked === 'WORKSPACE_ADAPTER_UNAVAILABLE' ? 'adapter.sendUnavailable' : blocked === 'MODEL_NOT_CONFIGURED' ? 'adapter.sendConfiguration' : 'adapter.sendUnknown') : authored('보내기 ↑'));
     $('build-plan').disabled = locked || Boolean(blocked) || !c || immutable || c.intent?.missingFields?.length !== 0 || c.status === 'UNSUPPORTED';
@@ -224,6 +227,7 @@
     $('create-mandate').disabled = locked || !state.health?.merchantConfigured;
     for (const id of ['suggest-wallet', 'suggest-incoming', 'suggest-outgoing']) $(id).disabled = doing || hasStartedConversation();
     renderPresentation();
+    emitVoiceContext();
     $('budget-setup-note').hidden = !state.wallet || state.health?.merchantConfigured === true;
     put($('budget-setup-note'), () => authored('자료 제공자의 결제 조건 연결을 준비 중입니다. 연결 후 예산 권한을 만들 수 있습니다.'));
   }
@@ -369,16 +373,21 @@
     $('plan-mandate').replaceChildren(option(() => authored('이번 작업의 조건을 별도 승인'), ''), ...choices.map(m => option(() => m.purpose + authored(' · 남은 ') + token(m.remainingAtomic) + authored(' 토큰'), m.id)));
     $('plan-mandate').value = selected; controls(); renderJourney();
   }
-  async function createConversation({ carryDraft = false } = {}) {
+  async function createConversation({ carryDraft = false, routeView = 'assistant', validate = null, focusDraft = true, preparedDraft = null } = {}) {
     if (workspaceBlock()) throw { code: workspaceBlock() };
-    saveDraft(); const draft = carryDraft ? snapshotDraft() : null;
+    // Voice ensure already captured the owner's draft before its own busy
+    // lease. Reuse it for both restoration and the original-route cache.
+    if (carryDraft && preparedDraft && state.wallet && state.draftBinding !== null) drafts.set(state.draftBinding, preparedDraft);
+    else saveDraft();
+    const draft = carryDraft ? preparedDraft ?? snapshotDraft() : null;
     const c = await api('/api/conversations', 'POST', { useMemory: $('conversation-memory').checked });
+    if (validate && !validate()) throw { code: 'VOICE_CONTEXT_CHANGED' };
     if (!c || !UUID.test(c.id)) throw { code: 'RESPONSE_UNAVAILABLE' };
     state.conversation = c; state.pendingMessage = null; state.pendingPlan = null; syncScope();
     state.draftBinding = c.id;
     $('message-text').value = ''; if (draft) applyDraft(draft);
-    commitRoute({ view: 'assistant', id: c.id, step: 'request' });
-    await loadConversations(); renderConversation(); $('message-text').focus();
+    commitRoute({ view: routeView, id: c.id, ...(routeView === 'assistant' ? { step: 'request' } : {}) });
+    await loadConversations(); renderConversation(); if (focusDraft) $('message-text').focus();
   }
   function explicitScope() {
     const value = {}, raw = rawScope();
@@ -436,15 +445,18 @@
   function renderActivity() { if (!state.activities.length) empty($('activity-list'), () => state.wallet ? authored('대화와 기억을 저장하면 활동 기록이 나타납니다.') : authored('지갑 로그인 후 내 활동 기록을 확인할 수 있습니다.')); else $('activity-list').replaceChildren(...activityRows(state.activities)); }
   function routeHash(route) {
     if (route.view === 'admin') return '#/admin' + (route.section && route.section !== 'overview' ? '/' + route.section : '');
+    if (route.view === 'voice' && route.id) return '#/voice/conversations/' + route.id.toLowerCase();
     if (route.view === 'assistant' && route.id) return '#/assistant/conversations/' + route.id.toLowerCase() + (route.step ? '/' + route.step : '');
     return '#/' + route.view + (route.view === 'tasks' && route.id ? '/' + route.id.toLowerCase() : '');
   }
   function parseRoute(hash) {
     if (hash === '' || hash === '#') return { view: 'assistant' };
-    const base = /^#\/(overview|assistant|tasks|memory|budgets|activity)\/?$/.exec(hash);
+    const base = /^#\/(overview|assistant|tasks|memory|budgets|activity|voice)\/?$/.exec(hash);
     if (base) return { view: base[1] };
     const admin = /^#\/admin(?:\/(requests|events))?\/?$/.exec(hash);
     if (admin) return { view: 'admin', ...(admin[1] ? { section: admin[1] } : {}) };
+    const voice = /^#\/voice\/conversations\/([a-f0-9-]+)\/?$/i.exec(hash);
+    if (voice && UUID.test(voice[1])) return { view: 'voice', id: voice[1].toLowerCase() };
     const task = /^#\/tasks\/([a-f0-9-]+)\/?$/i.exec(hash);
     if (task && UUID.test(task[1])) return { view: 'tasks', id: task[1].toLowerCase() };
     const conversation = /^#\/assistant\/conversations\/([a-f0-9-]+)(?:\/(request|plan|payment|result))?\/?$/i.exec(hash);
@@ -495,7 +507,7 @@
     // These are fixed authored view labels, never an owner's conversation or
     // Task content. Their locale bindings outlive authentication generations.
     ['view-eyebrow', 'view-title', 'view-description'].forEach((id, i) => locale.text($(id), views[name][i]));
-    $('quick-new').hidden = name === 'assistant' || name === 'admin';
+    $('quick-new').hidden = name === 'assistant' || name === 'admin' || name === 'voice';
     renderGuidedTask(); controls();
     window.dispatchEvent(new CustomEvent('floww:workspace-view', { detail: { view: name, section: state.route?.section ?? 'overview', routeVersion: state.routeVersion } }));
   }
@@ -538,10 +550,10 @@
       if (route.id) { state.route = { view: route.view }; state.draftBinding = 'new'; state.pendingFocus = null; writeRoute(state.route, 'replace'); status(authored('navigation.signIn')); }
       controls(); return;
     }
-    state.routeLoading = route.view === 'assistant' && Boolean(route.id); controls();
+    state.routeLoading = ['assistant', 'voice'].includes(route.view) && Boolean(route.id); controls();
     try {
       if (route.view === 'overview') await loadOverview();
-      if (route.view === 'assistant') {
+      if (['assistant', 'voice'].includes(route.view)) {
         if (route.id) {
           const c = await api('/api/conversations/' + encodeURIComponent(route.id));
           if (c?.id !== route.id) throw { code: 'RESPONSE_UNAVAILABLE' };
@@ -576,7 +588,7 @@
     if (!same) window.dispatchEvent(new CustomEvent('floww:route-change'));
     if (history !== 'none') writeRoute(canonical, history);
     state.pendingFocus = { hash: routeHash(canonical), version: state.routeVersion };
-    const differentConversation = canonical.view === 'assistant' && ((canonical.id ?? null) !== (state.conversation?.id ?? null) || (!canonical.id && state.draftBinding !== 'new'));
+    const differentConversation = ['assistant', 'voice'].includes(canonical.view) && ((canonical.id ?? null) !== (state.conversation?.id ?? null) || (!canonical.id && state.draftBinding !== 'new'));
     if (differentConversation) {
       state.conversation = null; state.pendingMessage = null; state.pendingPlan = null; state.selectedTask = null;
       state.draftBinding = canonical.id ? null : 'new';
@@ -589,7 +601,7 @@
   }
   function navigate(name) {
     if (!Object.hasOwn(views, name)) return;
-    return openRoute({ view: name, ...(name === 'assistant' && state.conversation ? { id: state.conversation.id } : {}),
+    return openRoute({ view: name, ...(['assistant', 'voice'].includes(name) && state.conversation ? { id: state.conversation.id } : {}),
       ...(name === 'tasks' && state.selectedTask ? { id: state.selectedTask.id } : {}) });
   }
   function selectTask(id) { if (typeof id === 'string' && UUID.test(id)) return openRoute({ view: 'tasks', id }); }
@@ -644,7 +656,7 @@
       if (state.view === 'assistant') commitRoute({ view: 'assistant', id: c.id, step: 'plan' }); }
     catch (error) { if (error.status) state.pendingPlan = null; throw error; }
   }
-  $('message-form').addEventListener('submit', event => {
+  function submitMessage(event, continueAfterMessage = () => true) {
     event.preventDefault(); if (!$('message-form').reportValidity()) return;
     if (!state.authReady) { status(authored('로그인 연결을 확인하고 있습니다. 입력한 내용은 유지합니다.')); return; }
     if (!state.wallet) {
@@ -652,9 +664,9 @@
       status(workspaceBlock() ? errors[workspaceBlock()] : authored('요청 내용을 유지합니다. 지갑 로그인 후 이어갑니다.')); $('connect-wallet').click(); return;
     }
     if (workspaceBlock()) { status(errors[workspaceBlock()], true); return; }
-    run('workspace.refine', async () => {
+    return run('workspace.refine', async () => {
       const text = $('message-text').value.trim(), scope = explicitScope();
-      if (!state.conversation) await createConversation({ carryDraft: true });
+      if (!state.conversation) await createConversation({ carryDraft: true, routeView: state.view === 'voice' ? 'voice' : 'assistant' });
       state.stage = 'refining'; renderJourney();
       const c = state.conversation, fingerprint = messageFingerprint(text, rawScope(), c.id);
       if (state.pendingMessage?.fingerprint !== fingerprint) state.pendingMessage = { fingerprint, body: {
@@ -663,10 +675,12 @@
       try { state.conversation = await api('/api/conversations/' + c.id + '/messages', 'POST', body); state.pendingMessage = null; }
       catch (error) { if (error.status && state.pendingMessage === pending) state.pendingMessage = null; throw error; }
       $('message-text').value = ''; syncScope(); renderConversation();
+      if (!continueAfterMessage()) return;
       if (state.conversation.status === 'READY_TO_PLAN' && !state.conversation.plan && !state.conversation.working) await planCurrent();
       await loadConversations();
     }, { refreshConversation: true });
-  });
+  }
+  $('message-form').addEventListener('submit', event => { submitMessage(event); });
   $('build-plan').addEventListener('click', () => run('workspace.plan', async () => { await planCurrent(); await loadConversations(); }, { refreshConversation: true }));
   for (const id of ['intent-wallet', 'intent-start', 'intent-end']) $(id).addEventListener('input', () => { controls(); renderJourney(); });
   $('confirm-plan-form').addEventListener('submit', event => {
@@ -703,6 +717,85 @@
   });
   $('refresh-mandates').addEventListener('click', () => run('workspace.loadMandates', loadBudgets));
   $('refresh-activity').addEventListener('click', () => run('workspace.loadActivity', loadActivity));
+  function linkedVoiceTask() { const id = state.conversation?.linkedTaskId; return id && state.selectedTask?.id === id ? state.selectedTask : null; }
+  function voiceIdentity() {
+    return JSON.stringify([state.epoch, state.sessionGeneration, state.routeVersion, state.conversation?.id ?? null,
+      state.conversation?.revision ?? null, state.conversation?.linkedTaskId ?? null, rawScope(), $('conversation-memory').checked,
+      $('plan-mandate').value, state.pendingMessage, state.pendingPlan, state.conversation?.linkedTaskId ? [linkedVoiceTask()?.id ?? null, linkedVoiceTask()?.revision ?? null, linkedVoiceTask()?.payment ?? null, linkedVoiceTask()?.delivery ?? null] : null]);
+  }
+  function actualAssistant() {
+    if (!state.wallet || state.routeLoading || (state.route?.id && state.conversation?.id !== state.route.id)) return null;
+    if (state.conversation?.linkedTaskId) {
+      const task = linkedVoiceTask(), answer = task?.result?.answer;
+      if (task?.payment !== 'CONFIRMED' || task?.delivery !== 'COMPLETED' || !Number.isSafeInteger(task.revision) || task.revision < 1 ||
+          !answer || typeof answer !== 'object' || Array.isArray(answer) || typeof answer.answer_text !== 'string' || !answer.answer_text.trim()) return null;
+      return Object.freeze({ id: 'report:' + task.id + ':' + task.revision, text: answer.answer_text, conversationId: state.conversation.id,
+        kind: 'report', taskId: task.id, taskRevision: task.revision, synthetic: answer.is_synthetic === true, complete: answer.complete === true });
+    }
+    const message = [...(state.conversation?.messages ?? [])].reverse().find(m => m.role === 'assistant' && typeof m.text === 'string' && m.text.trim());
+    return message ? Object.freeze({ id: message.id, text: message.text, conversationId: state.conversation.id }) : null;
+  }
+  function voiceSnapshot() {
+    const lease = Object.freeze({}), identity = voiceIdentity();
+    voiceLeases.set(lease, { identity, draft: $('message-text').value });
+    const c = state.conversation, bound = !state.route?.id || c?.id === state.route.id;
+    return Object.freeze({ lease, identity, ownerEpoch: state.epoch, owner: state.wallet, generation: state.sessionGeneration, authenticated: Boolean(state.wallet),
+      authReady: state.authReady, view: state.view, routeVersion: state.routeVersion, requestedId: state.route?.id ?? null, conversationId: bound ? c?.id ?? null : null,
+      revision: bound ? c?.revision ?? null : null, linkedTaskId: bound ? c?.linkedTaskId ?? null : null,
+      title: bound ? c?.title ?? '' : '', draft: $('message-text').value, reply: actualAssistant(),
+      pending: Boolean(state.pendingMessage || state.pendingPlan), modelBlock: workspaceBlock(), busy: state.busy || state.taskBusy || state.routeLoading,
+      writable: bound && state.authReady && Boolean(state.wallet) && !state.busy && !state.taskBusy && !state.routeLoading && !c?.linkedTaskId && !c?.planLocked && !c?.working && !state.pendingMessage && !state.pendingPlan });
+  }
+  function voiceValid(lease, checkDraft = false) {
+    const saved = voiceLeases.get(lease);
+    return Boolean(saved && saved.identity === voiceIdentity() && (!checkDraft || saved.draft === $('message-text').value));
+  }
+  function emitVoiceContext() { if (voiceListeners.size) { const value = voiceSnapshot(); for (const listener of voiceListeners) { try { Promise.resolve(listener(value)).catch(() => {}); } catch { /* Voice cannot interrupt the workspace. */ } } } }
+  async function ensureVoiceConversation(lease, stillCurrent = () => true) {
+    if (!voiceValid(lease, true)) throw { code: 'VOICE_CONTEXT_CHANGED' };
+    const context = voiceSnapshot(); if (!context.writable) throw { code: context.linkedTaskId ? 'CONVERSATION_ALREADY_LINKED' : 'CONVERSATION_BUSY' };
+    if (state.conversation) return context;
+    const flightKey = voiceIdentity() + JSON.stringify($('message-text').value);
+    if (voiceEnsureFlight?.key === flightKey) return voiceEnsureFlight.promise;
+    const flight = { key: flightKey, promise: null }; voiceEnsureFlight = flight;
+    const epoch = state.epoch, routeVersion = state.routeVersion, draft = snapshotDraft(), token = {};
+    state.busy = true; state.runToken = token; controls();
+    const valid = () => stillCurrent() && state.epoch === epoch && state.routeVersion === routeVersion && state.runToken === token &&
+      $('message-text').value === draft.text && JSON.stringify(rawScope()) === JSON.stringify(draft.scope) && $('conversation-memory').checked === draft.memory;
+    flight.promise = (async () => {
+      try { await createConversation({ carryDraft: true, routeView: state.view === 'voice' ? 'voice' : 'assistant', validate: valid, focusDraft: false, preparedDraft: draft }); }
+      finally { if (state.epoch === epoch && state.runToken === token) { state.busy = false; state.runToken = null; controls(); } if (voiceEnsureFlight === flight) voiceEnsureFlight = null; }
+      return voiceSnapshot();
+    })();
+    return flight.promise;
+  }
+  function applyVoiceTranscript(lease, text) {
+    if (!voiceValid(lease)) return { ok: false, code: 'VOICE_CONTEXT_CHANGED' };
+    if (!voiceValid(lease, true)) return { ok: false, code: 'VOICE_DRAFT_CHANGED' };
+    if (typeof text !== 'string' || !text.trim() || text.length > 2000) return { ok: false, code: 'INVALID_WORKSPACE_TEXT' };
+    const context = voiceSnapshot(); if (!context.writable) return { ok: false, code: 'CONVERSATION_BUSY' };
+    const combined = context.draft ? context.draft + '\n' + text : text;
+    if (combined.length > 2000) return { ok: false, code: 'INVALID_WORKSPACE_TEXT' };
+    $('message-text').value = combined; saveDraft(); controls(); return { ok: true, snapshot: voiceSnapshot() };
+  }
+  window.FlowwWorkspaceVoice = Object.freeze({ snapshot: voiceSnapshot, valid: voiceValid, ensureConversation: ensureVoiceConversation,
+    applyTranscript: applyVoiceTranscript, readActualAssistant: actualAssistant,
+    subscribe(listener) {
+      if (typeof listener !== 'function' || (!voiceListeners.has(listener) && voiceListeners.size >= 8)) throw new TypeError('INVALID_VOICE_LISTENER');
+      voiceListeners.add(listener); try { Promise.resolve(listener(voiceSnapshot())).catch(() => {}); } catch { /* isolated optional surface */ }
+      return () => voiceListeners.delete(listener);
+    },
+    async send(lease, text, continueAfterMessage = () => true) {
+      const result = applyVoiceTranscript(lease, text); if (!result.ok) return result;
+      const epoch = state.epoch, cId = state.conversation?.id, previousReply = actualAssistant()?.id;
+      await submitMessage({ preventDefault() {} }, continueAfterMessage);
+      if (state.epoch !== epoch || state.conversation?.id !== cId) return { ok: false, stale: true };
+      const reply = actualAssistant(); return { ok: true, accepted: $('message-text').value === '', snapshot: voiceSnapshot(), reply: reply?.id !== previousReply ? reply : null };
+    },
+    openFull() { return navigate('voice'); },
+    continueChat() { return navigate('assistant'); },
+    focusComposer() { $('message-text').focus(); }
+  });
   window.addEventListener('floww:session', event => {
     const readyBefore = state.authReady, wallet = event.detail?.wallet ?? null;
     const generation = Number.isInteger(event.detail?.generation) ? event.detail.generation : null;
@@ -722,7 +815,7 @@
     state.wallet = wallet; state.sessionGeneration = generation; state.epoch++; state.routeVersion++; state.runToken = null; state.routeLoading = false;
     state.busy = false; state.taskBusy = false; state.selectedTask = null; state.stage = null; state.pendingFocus = null;
     state.conversation = null; state.conversations = []; state.conversationCursor = null; state.memories = []; state.memoryCursor = null;
-    state.draftBinding = state.route?.view === 'assistant' && state.route.id ? null : 'new';
+    state.draftBinding = ['assistant', 'voice'].includes(state.route?.view) && state.route.id ? null : 'new';
     state.mandates = []; state.dashboard = null; state.catalog = []; state.activities = []; state.tasks = [];
     state.pendingMessage = null; state.pendingPlan = null;
     $('message-text').value = ''; $('memory-key').value = ''; $('memory-value').value = ''; $('memory-ack').checked = false;

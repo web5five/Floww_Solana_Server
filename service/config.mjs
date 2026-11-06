@@ -81,6 +81,13 @@ export function loadConfig(env = process.env) {
   const maxOwnerConcurrentOperations = count(env.FLOWW_MAX_OWNER_OPERATIONS, Math.min(2, maxConcurrentOperations), maxConcurrentOperations);
   const globalModelDailyLimit = count(env.FLOWW_MODEL_DAILY_CALLS, 60, 1000);
   const ownerModelDailyLimit = count(env.FLOWW_MODEL_OWNER_DAILY_CALLS, Math.min(20, globalModelDailyLimit), globalModelDailyLimit);
+  if (env.FLOWW_ENABLE_VOICE !== undefined && !['true', 'false'].includes(env.FLOWW_ENABLE_VOICE)) fail('INVALID_CONFIGURATION', 500);
+  const voiceApiKey = env.FLOWW_VOICE_API_KEY ?? null;
+  if (voiceApiKey !== null && (typeof voiceApiKey !== 'string' || voiceApiKey.length > 4096 || /\s/.test(voiceApiKey))) fail('INVALID_CONFIGURATION', 500);
+  const voiceDailyCalls = count(env.FLOWW_VOICE_DAILY_CALLS, 30, 1000);
+  const voiceOwnerDailyCalls = count(env.FLOWW_VOICE_OWNER_DAILY_CALLS, Math.min(10, voiceDailyCalls), voiceDailyCalls);
+  const voiceDailySeconds = count(env.FLOWW_VOICE_DAILY_SECONDS, 600, 3600);
+  const voiceOwnerDailySeconds = count(env.FLOWW_VOICE_OWNER_DAILY_SECONDS, Math.min(180, voiceDailySeconds), voiceDailySeconds);
   const port = Number(env.PORT || originUrl.port || (originUrl.protocol === 'https:' ? 443 : 80));
   if (!Number.isInteger(port) || port < 1 || port > 65535) fail('INVALID_CONFIGURATION', 500);
   const paymentEnabled = env.FLOWW_ENABLE_DEVNET_PAYMENTS === 'true';
@@ -99,6 +106,9 @@ export function loadConfig(env = process.env) {
     merchantOrigin: origin, merchantBaseUrl: origin + '/merchant/reports',
     merchantPayTo, asset, assetDecimals: 6, amountAtomic, maxPaymentAtomic, dailyPaymentAtomic,
     maxConcurrentOperations, maxOwnerConcurrentOperations, globalModelDailyLimit, ownerModelDailyLimit,
+    voiceEnabled: env.FLOWW_ENABLE_VOICE === 'true', voiceApiKey: voiceApiKey || null,
+    voiceDailyCalls, voiceOwnerDailyCalls, voiceDailySeconds, voiceOwnerDailySeconds,
+    voiceUploadTimeoutMs: 10_000, voiceProviderTimeoutMs: 20_000,
     paymentEnabled, payerKeyFile: env.FLOWW_PAYER_KEY_FILE || null, adminWallets: administrators,
     requestTimeoutMs: 12000, quoteTtlMs: 5 * 60_000, sessionTtlMs: 8 * 3600_000,
     model: env.FLOWW_MODEL || null, apiKey: env.OPENAI_API_KEY || null,

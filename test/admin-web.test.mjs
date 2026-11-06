@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
+import { createRequestTelemetry } from '../service/observability.mjs';
 import { harness, client, taskClient, adminClient, A, B, TASK_A, CONVERSATION_A, response, deferred, settle, until, task, conversation, overview } from './ui-harness.mjs';
 
 const original = JSON.parse(await readFile(new URL('./fixtures/admin-read-v1.json', import.meta.url), 'utf8'));
@@ -121,6 +123,30 @@ test('15/60 minute filter uses only observed rows and is a local-only interactio
 test('malformed process window cannot synthesize observed zeros or a ready chart', async () => {
   const { h } = await ready({ mutate(f) { f.overview.sources.runtime.data.minuteBuckets[0].minute = '2026-11-07T02:02:00.000Z'; } });
   assert.equal(h.get('admin-traffic').querySelector('svg'), null); assert.match(h.get('admin-runtime-source').textContent, /shape|verified/i);
+});
+
+test('actual voice telemetry remains readable in the operator traffic and request views', async () => {
+  const capturedAt = original.overview.sources.runtime.capturedAt;
+  const telemetry = createRequestTelemetry({ write: () => true, clock: () => 0, wallClock: () => Date.parse(capturedAt) });
+  for (const [method, path] of [['GET', '/api/voice/capabilities'], ['POST', '/api/voice/transcriptions']]) {
+    const res = new EventEmitter(); res.statusCode = 401;
+    telemetry.observeRequest({ method, route: { path }, url: path + '?private=NEVER_DISPLAY_THIS' }, res);
+    res.emit('finish');
+  }
+  const snapshot = telemetry.operatorSnapshot();
+  assert.deepEqual(snapshot.requests.map(r => r.route), ['voice_transcription', 'voice_capabilities']);
+  const { h } = await ready({ mutate(f) {
+    const runtime = f.overview.sources.runtime;
+    runtime.data = { ...runtime.data, ...snapshot };
+    f.requests.data = { ...f.requests.data, requests: snapshot.requests, retained: snapshot.requests.length };
+  } });
+  assert.ok(h.get('admin-traffic').querySelector('svg'));
+  assert.equal(h.get('admin-request-rows').children.length, 2);
+  assert.match(h.get('admin-request-rows').textContent, /voice_transcription/);
+  assert.match(h.get('admin-request-rows').textContent, /voice_capabilities/);
+  assert.doesNotMatch(h.get('admin-request-rows').textContent, /NEVER_DISPLAY_THIS/);
+  assert.doesNotMatch(h.get('admin-runtime-source').textContent, /shape|verified/i);
+  assert.equal(writes(h).length, 0);
 });
 
 test('event subroute uses the current task-state marker, no private Task links, and canonical timestamps', async () => {
