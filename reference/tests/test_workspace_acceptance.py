@@ -90,12 +90,14 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
         with self.assertRaises(acceptance.InvalidAcceptance):
             acceptance.validate_suite(value)
 
-    def test_v3_changes_only_version_prompt_and_previous_hash_while_v2_bytes_and_core_are_unchanged(self):
-        previous = ROOT / "evaluations" / "workspace-live-acceptance-v2.json"
-        self.assertEqual(hashlib.sha256(previous.read_bytes()).hexdigest(), "e7075803eac9a34866d07a68ff45bafae4876f16d69b4591ea646c1a371f3a3b")
+    def test_v4_changes_only_version_prompt_and_previous_hash_while_v3_bytes_and_core_are_unchanged(self):
+        v2 = ROOT / "evaluations" / "workspace-live-acceptance-v2.json"
+        self.assertEqual(hashlib.sha256(v2.read_bytes()).hexdigest(), "e7075803eac9a34866d07a68ff45bafae4876f16d69b4591ea646c1a371f3a3b")
+        previous = ROOT / "evaluations" / "workspace-live-acceptance-v3.json"
+        self.assertEqual(hashlib.sha256(previous.read_bytes()).hexdigest(), "d401b7ab4f42e8df76fb9372e857d968573921d7b504e69a217316d19ccfd655")
         v2 = json.loads(previous.read_text())
         self.assertEqual(acceptance._hash(v2), acceptance.PREVIOUS_SUITE_HASH)
-        expected = copy.deepcopy(v2); expected.update(version="workspace-live-acceptance/v3", promptVersion="workspace/v3",
+        expected = copy.deepcopy(v2); expected.update(version="workspace-live-acceptance/v4", promptVersion="workspace/v4",
             previousRegressionSuiteHash=acceptance.PREVIOUS_SUITE_HASH)
         self.assertEqual(self.suite, expected)
         for field in ("cases", "grounding", "rubric", "expectedRoleCounts"):

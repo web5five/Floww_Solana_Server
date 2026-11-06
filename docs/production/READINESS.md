@@ -73,7 +73,7 @@ role calls completed, with7/12 cases and22/32 stages passing the automated
 criteria. Independent agent review found material output-preference, language,
 supported-recovery and critic false-positive problems. This is failed acceptance,
 not a general accuracy estimate. [AI_QUALITY.md](AI_QUALITY.md) binds the retained
-baseline and defines the current version3 output contract, retained version2 failure,
+baseline and defines the current version4 output contract, retained failures,
 local checks and still-pending live regression. The same cases are explicitly a post-baseline regression set;
 scripted success or a deterministic suffix does not close actual model quality.
 

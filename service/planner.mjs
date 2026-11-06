@@ -5,7 +5,7 @@ import path from 'node:path';
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const MAX_INPUT = 64_000, MAX_OUTPUT = 16_000, MAX_PROCESSES = 2;
 let active = 0;
-const RESOURCE = 'wallet-transfers', PROMPT = 'workspace/v3';
+const RESOURCE = 'wallet-transfers', PROMPT = 'workspace/v4';
 const FIELDS = ['purpose', 'wallet', 'windowStart', 'windowEnd', 'resourceId', 'missingFields'];
 const CODES = new Set(['MODEL_NOT_CONFIGURED', 'WORKSPACE_INVALID_INPUT', 'WORKSPACE_INPUT_TOO_LARGE',
   'WORKSPACE_INVALID_MODEL_OUTPUT', 'WORKSPACE_STALE_CONTEXT', 'WORKSPACE_SCOPE_REQUIRED',

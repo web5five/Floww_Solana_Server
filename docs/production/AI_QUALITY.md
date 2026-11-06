@@ -68,7 +68,7 @@ language compliance, faithful recovery and accurate critic explanations need
 actual samples and semantic review. A canonical suffix or critic `ACCEPT`
 cannot prove them.
 
-The current `workspace/v3` refiner follows a short ordered contract: current
+The current `workspace/v4` refiner follows a short ordered contract: current
 goal, exact user-derived scope anchors, missing fields recomputed from returned
 nulls, then status. The schema fixes wallet/start/end to those anchors, including
 null when unresolved. The validator rejects clearing a known anchor, inventing
@@ -76,6 +76,13 @@ an unknown one, contradictory missing fields and asking for clarification when
 the scope is already valid and complete. It never changes such a response into
 `READY_TO_PLAN`. A submillisecond interval fails closed rather than being silently
 truncated into a different scope.
+
+`currentUserMessage` repeats the exact latest normalized user text, excluding a
+trailing assistant reply. `temporalScope` is computed only from the explicit
+anchors and supplied UTC clock. Unknown bounds produce null comparisons; known
+bounds get date-order, non-future and maximum-window facts. Those facts are part
+of the context digest and cannot be supplied by the caller, memory or model.
+They do not classify the goal, fill another missing field or authorize a plan.
 
 The critic distinguishes an unsupported capability claim from a statement that
 the capability is unavailable, and an authority grant from a requirement for
@@ -102,8 +109,20 @@ not product workflow success. The original sample and review are retained.
 
 ## Repeatable acceptance
 
+The retained version3 sample at source
+`11092a09390267fdf56e2559fc38e67236c63cab` improved the automated result to
+10/12 cases and29/32 stages. It returned38 core roles, evaluated31 stages and
+correctly blocked one plan after a failed refinement. The separate two
+interface-language probes passed with4 role calls. All42 POSTs had usage
+receipts; the conservative calculation was$0.06861075. The run took82.793seconds,
+without retries, provider uncertainty or artifact failure.
+
+Two Korean defects remain: a valid past interval was called future, and a
+supported transfer-only correction inherited an earlier unsupported refusal.
+The sample failed acceptance and was preserved before further changes.
+
 The source corpus is
-[`workspace-live-acceptance-v3.json`](../../reference/evaluations/workspace-live-acceptance-v3.json).
+[`workspace-live-acceptance-v4.json`](../../reference/evaluations/workspace-live-acceptance-v4.json).
 Its original cases, rubric, expected labels, fixture facts and role denominators
 are unchanged. Its split is explicitly `post-baseline-regression`; the same
 examples are no longer an unseen acceptance set. The result also states that
@@ -139,9 +158,9 @@ transfer retrieval, model arithmetic, payment, microphone or public deployment
 acceptance. Actual-person review remains distinct from controller/agent review,
 consistent with [OpenAI's evaluation guidance](https://developers.openai.com/api/docs/guides/evaluation-best-practices).
 
-Version3 integration and actual-provider reevaluation are in progress. Before
+Version4 integration and actual-provider reevaluation are in progress. Before
 new provider calls, the controller binds the frozen evaluator and production
 sources, obtains independent source/supervisor review and keeps prior costs in
-the cumulative$1 authorization. The pre-version3 conservative total is
-$0.57766650, including a historical$0.45 reserve and both retained samples.
+the cumulative$1 authorization. The pre-version4 conservative total is
+$0.64627725, including a historical$0.45 reserve and all three retained samples.
 Local checks, actual-provider results and exact-source CI remain separate gates.
