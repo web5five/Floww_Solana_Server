@@ -181,6 +181,33 @@ class WorkspaceRoleTests(unittest.TestCase):
                 response["intent"].update(windowStart=start, windowEnd="2026-11-06T12:00:00.000Z")
                 self.assertEqual(run("refine", data, ScriptedModel(response))["status"], "READY_TO_PLAN")
 
+    def test_multiple_duration_additions_and_alternatives_cannot_choose_one_scope(self):
+        for phrase in ("최근 하루 그리고 12시간", "지난 하루, 그리고 이틀", "최근 하루 또는 최근 이틀",
+                       "최근 하루 그리고 최근 이틀", "최근 이틀 혹은 최근 사흘", "최근 하루 + 최근 이틀"):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
+                clarification = refined(data, status="CLARIFICATION_REQUIRED", assistantText="하나의 정확한 관찰 기간을 알려 주세요.")
+                clarification["intent"].update(windowStart=None, windowEnd=None, missingFields=["windowStart", "windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
+                model = ScriptedModel()
+                self.assertEqual(run("plan", data, model)["status"], "STOPPED"); self.assertEqual(model.calls, [])
+
+    def test_only_an_explicit_complete_replacement_selects_the_latest_duration(self):
+        for phrase in ("지난 하루가 아니라 최근 이틀", "지난 하루 말고 최근 이틀", "지난 하루 대신 최근 이틀"):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertEqual(anchors["windowStart"], "2026-11-04T12:00:00.000Z")
+                response = refined(data); response["intent"].update(anchors)
+                result = run("refine", data, ScriptedModel(response))
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+                data["intent"] = result["intent"]
+                data["messages"].append({"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."})
+                self.assertEqual(run("plan", data, ScriptedModel(planned(data), critic(data)))["status"], "PROPOSED")
+
     def test_korean_named_scope_stays_frozen_for_planning_and_style_only_followup(self):
         for word, days in (("하루", 1), ("이틀", 2), ("사흘", 3), ("일주일", 7)):
             with self.subTest(word=word):

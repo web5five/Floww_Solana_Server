@@ -41,7 +41,7 @@ cookies or payer material were added to source or evidence.
   PostgreSQL checks enabled. Of these, 39 browser-client behavior regressions
   execute the shipped scripts with a small DOM harness and scripted fetch;
   eight dedicated checks cover exact decimal/atomic conversions.
-- Final Python suite: **173 passed**. Korean rolling-day expressions preserve
+- Final Python suite: **175 passed**. Korean rolling-day expressions preserve
   frozen windows; unsupported compound/negated durations remain unresolved.
 - Syntax, whitespace and NFC checks cover **56 integration files**.
   `actionlint` and `git diff --check` passed. No dependencies were added.

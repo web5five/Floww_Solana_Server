@@ -92,6 +92,8 @@ _RELATIVE = re.compile(r"(?:\b(?:last|past)\s+(\d{1,2})\s+(hours?|days?)\b|(?:�
 _KOREAN_DAYS = {"하루": 1, "이틀": 2, "사흘": 3, "일주일": 7}
 _NAMED_SUFFIX = re.compile(r"^(?:$|\W|(?:동안의|간의|동안|간|치|의|을|를|은|는|에|로|만|가|이)(?=$|\W))")
 _NAMED_UNCERTAIN = re.compile(r"^[\W_]*(?:(?:동안|간|치)[\W_]*)?(?:(?:은|는|이|가|을|를|로)[\W_]*)?(?:아니|아닌|아닙|말고|빼고|제외|대신|또는|혹은|내지|이상|이하|초과|미만|보다|넘|정도|쯤|가량|조금|대략|하루|이틀|사흘|일주일|[+＋*/／×÷=~～&|｜−-]|반(?=$|\W|동안|간|정도|쯤|만|을|은|이|가|의|로)|\d{1,2}\s*(?:시간|일|분))")
+_DURATION = re.compile(r"(?:\b\d{1,2}\s*(?:hours?|days?)\b|(?<!\d)\d{1,2}\s*(?:시간|일|분)|하루|이틀|사흘|일주일)", re.I)
+_REPLACEMENT = re.compile(r"^[\s,，;；:：]*(?:(?:은|는|이|가|을|를|만)\s*)?(?:아니라|아니고|아닌|말고|대신)[\s,，;；:：]*$")
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
@@ -148,6 +150,22 @@ def _relative_delta(text, match):
     return timedelta(hours=count) if hours else timedelta(days=count)
 
 
+def _selected_relative(text, relative):
+    mentions = list(_DURATION.finditer(text))
+    if len(relative) == 1 and len(mentions) == 1:
+        return relative[0]
+    # Multiple durations express a compound/alternative unless exactly two
+    # complete relative frames form an explicit replacement. Never sum them or
+    # choose the last branch of a disjunction as the user's definite scope.
+    if len(relative) != 2 or len(mentions) != 2:
+        return None
+    if any(not (frame.start() <= mention.start() and mention.end() <= frame.end())
+           for frame, mention in zip(relative, mentions)):
+        return None
+    between = text[relative[0].end():relative[1].start()]
+    return relative[1] if _REPLACEMENT.fullmatch(between) else None
+
+
 def _intent(raw, *, output=False):
     if raw is None:
         raw = dict.fromkeys(SCOPE_FIELDS, None) | {"missingFields": list(SCOPE_FIELDS)}
@@ -198,8 +216,8 @@ def _anchors(messages, intent, now, operation):
                 _date(dates[-2]); _date(dates[-1])
                 start, end, window_seen = dates[-2], dates[-1], True
             elif relative:
-                match = relative[-1]
-                delta = _relative_delta(text, match)
+                match = _selected_relative(text, relative)
+                delta = _relative_delta(text, match) if match is not None else None
                 # A relative window is resolved when refined. A later plan or
                 # style-only turn must not silently slide that frozen interval.
                 same_span = (delta is not None and intent["windowStart"] is not None and intent["windowEnd"] is not None
