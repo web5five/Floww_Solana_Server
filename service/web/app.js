@@ -7,6 +7,108 @@
   const locale = window.FlowwLocale, authored = locale.copy;
   const put = (node, value) => locale.text(node, value, () => state.sessionEpoch);
   let announcedWallet, announcedGeneration;
+  let documentSuspended = false, documentCycle = 0, restoreRead = 0, privateHold = null, requireExplicitLogin = false;
+  let restoreFlight = null;
+  let initialGate = true, initialTraversalDone;
+  const initialTraversal = new Promise(resolve => { initialTraversalDone = resolve; });
+  const requests = new Set();
+  const layout = document.querySelector('.app-layout'), restoreGate = document.createElement('section');
+  restoreGate.id = 'session-restore'; restoreGate.className = 'panel'; restoreGate.hidden = true; restoreGate.setAttribute('role', 'status');
+  const restoreTitle = document.createElement('h1'), restoreText = document.createElement('p'), restoreButton = document.createElement('button');
+  restoreTitle.id = 'session-restore-title'; restoreText.id = 'session-restore-text'; restoreButton.id = 'session-restore-retry';
+  restoreButton.type = 'button'; restoreButton.className = 'button button-dark'; restoreGate.append(restoreTitle, restoreText, restoreButton);
+  layout.parentNode.insertBefore(restoreGate, layout);
+  function gateSession(checking = true) {
+    layout.hidden = true; layout.inert = true; restoreGate.hidden = false;
+    $('connect-wallet').hidden = true; $('connect-wallet').disabled = true; $('connect-wallet').removeAttribute('title'); $('connect-wallet').title = '';
+    locale.text($('connect-wallet'), authored('지갑 연결')); $('logout').hidden = true; $('logout').disabled = true; $('create-task').disabled = true;
+    locale.text(restoreTitle, authored('lifecycle.checking'));
+    locale.text(restoreText, authored(checking ? 'lifecycle.checkingCopy' : 'lifecycle.unavailable'));
+    locale.text(restoreButton, authored('lifecycle.retry')); restoreButton.hidden = checking; restoreButton.disabled = checking;
+  }
+  function lifecycleEvent(type, detail = {}) { window.dispatchEvent(new CustomEvent(type, { detail: { cycle: documentCycle, ...detail } })); }
+  function suspendDocument() {
+    if (documentSuspended) {
+      // A second departure can interrupt a still-pending authority check. Keep
+      // the original quarantine, but invalidate that check before freezing.
+      documentCycle++; restoreRead++; state.sessionEpoch++;
+      for (const controller of requests) controller.abort(); requests.clear(); gateSession(); return;
+    }
+    documentSuspended = true; documentCycle++; restoreRead++;
+    const task = active();
+    privateHold = { owner: state.wallet, request: Object.fromEntries(['purpose', 'report-wallet', 'window-start', 'window-end'].map(id => [id, $(id).value])),
+      pendingCreate: state.pendingCreate, selectionTarget: state.selectionTarget,
+      quote: task?.quote ? { id: task.id, quote: { ...task.quote }, budget: $('budget').value, expiry: $('approval-expiry').value } : null };
+    // Fence continuations before any promise can resume, including approve→execute.
+    state.sessionEpoch++; state.selectionEpoch++; state.navigationEpoch++; state.pendingSelection = null;
+    state.busy = false; state.busyToken = null; state.busyOperation = ''; state.initializing = true;
+    for (const controller of requests) controller.abort(); requests.clear(); stopPolling();
+    gateSession(); lifecycleEvent('floww:document-suspend'); clearPrivateTasks(); state.health = null;
+    for (const id of ['health-status', 'health-detail', 'live-status']) put($(id), () => '');
+    gateSession();
+  }
+  function restoreDocument() {
+    if (!documentSuspended) return;
+    if (restoreFlight?.cycle === documentCycle) return restoreFlight.promise;
+    const flight = { cycle: documentCycle, promise: null }; restoreFlight = flight;
+    flight.promise = verifyRestoredDocument().finally(() => { if (restoreFlight === flight) restoreFlight = null; });
+    return flight.promise;
+  }
+  async function verifyRestoredDocument() {
+    if (!documentSuspended) return;
+    const cycle = documentCycle, read = ++restoreRead; gateSession();
+    const current = () => documentSuspended && documentCycle === cycle && restoreRead === read;
+    let session;
+    try {
+      session = await api('/api/session', 'GET', undefined, {}, { lifecycle: true });
+      if (!current()) return;
+      if (!session || typeof session.wallet !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(session.wallet) ||
+          !Number.isFinite(Date.parse(session.expiresAt)) || Date.parse(session.expiresAt) <= Date.now()) throw { code: 'RESPONSE_UNAVAILABLE' };
+    } catch (error) {
+      if (!current()) return;
+      if (error.stale) { gateSession(false); return; }
+      if (error.status !== 401) { gateSession(false); restoreButton.focus(); return; }
+      session = null;
+    }
+    if (!current()) return;
+    if (requireExplicitLogin) session = null;
+    const sameOwner = Boolean(session && privateHold?.owner && session.wallet === privateHold.owner), held = privateHold;
+    if (!sameOwner) privateHold = null;
+    state.sessionEpoch++; state.selectionEpoch++; state.wallet = session?.wallet ?? null; state.initializing = false;
+    state.activeId = null; state.selectionTarget = sameOwner ? held.selectionTarget : null;
+    if (sameOwner) { for (const [id, value] of Object.entries(held.request)) $(id).value = value; state.pendingCreate = held.pendingCreate; }
+    // The old document has no authority until the read above succeeds. Restoring
+    // a draft never replays its request or any acknowledgment.
+    documentSuspended = false; lifecycleEvent('floww:document-resume', { sameOwner });
+    render(); emitSession(); restoreGate.hidden = true; layout.inert = false; layout.hidden = false; $('connect-wallet').hidden = false;
+    $('workspace-top').focus({ preventScroll: true });
+    startPolling();
+    const epoch = state.sessionEpoch;
+    try { state.health = await api('/api/health'); if (epoch === state.sessionEpoch) { render(); emitSession(); } } catch { /* new model/purchase work stays unready */ }
+    if (state.wallet && epoch === state.sessionEpoch) {
+      try { await loadTasks(); if (epoch === state.sessionEpoch) render(); }
+      catch (error) { if (!error.stale && epoch === state.sessionEpoch && error.status === 401) clearSession(); }
+    }
+    if (epoch === state.sessionEpoch && !privateHold?.quote) privateHold = null;
+  }
+  restoreButton.addEventListener('click', restoreDocument);
+  window.addEventListener('pagehide', suspendDocument);
+  window.addEventListener('pageshow', event => {
+    if (event.persisted || documentSuspended) {
+      initialGate = false; initialTraversalDone();
+      if (!documentSuspended) suspendDocument(); restoreDocument();
+    } else if (initialGate) {
+      // Browser history can restore native form values even without BFCache.
+      // Finish that traversal before clearing unbound values and binding auth.
+      const complete = () => {
+        if (documentSuspended || !initialGate) return;
+        clearPrivateTasks(); lifecycleEvent('floww:document-reset');
+        initialGate = false; initialTraversalDone();
+      };
+      if (typeof window.requestAnimationFrame === 'function') window.requestAnimationFrame(complete);
+      else setTimeout(complete, 0);
+    }
+  });
   const policyNames = { PENDING: authored('승인 대기'), ALLOW: authored('승인됨'), DENY: authored('승인되지 않음') };
   const paymentNames = { NOT_STARTED: authored('시작 전'), SIGNING: authored('서명 준비 중'), PENDING: authored('확인 중'), UNKNOWN: authored('확인 필요'), CONFIRMED: authored('결제 확인됨'), FAILED: authored('거래 실패') };
   const deliveryNames = { NOT_STARTED: authored('시작 전'), PENDING: authored('전달 확인 중'), COMPLETED: authored('전달 완료'), FAILED: authored('전달 확인 필요') };
@@ -101,12 +203,14 @@
   function clearNotice() { $('notice').hidden = true; put($('notice-text'), () => ''); }
   function announce(text) { put($('live-status'), () => text); }
 
-  async function api(path, method = 'GET', body, extraHeaders = {}) {
+  async function api(path, method = 'GET', body, extraHeaders = {}, { lifecycle = false, keepalive = false } = {}) {
+    if (documentSuspended && !lifecycle) throw { code: 'AUTHENTICATION_REQUIRED', stale: true };
     const epoch = state.sessionEpoch;
     const controller = new AbortController();
+    if (!keepalive) requests.add(controller);
     const timer = setTimeout(() => controller.abort(), 45_000);
     try {
-      const response = await fetch(path, { method, credentials: 'same-origin', redirect: 'error',
+      const response = await fetch(path, { method, credentials: 'same-origin', redirect: 'error', keepalive,
         headers: { ...(body === undefined ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' }), ...extraHeaders },
         body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal,
       });
@@ -121,7 +225,7 @@
     } catch (error) {
       if (error?.code) throw error;
       throw { code: error?.name === 'AbortError' ? 'RESPONSE_UNAVAILABLE' : 'SERVICE_UNAVAILABLE' };
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); requests.delete(controller); }
   }
 
   function clearPrivateTasks() {
@@ -129,19 +233,20 @@
     $('request-form').reset(); $('approval-form').reset(); $('include-archived').checked = false;
     $('window-end').value = localDate(Date.now() - 1000); $('window-start').value = localDate(Date.now() - 86_400_000);
     clearNotice();
-    for (const id of ['result-content', 'timeline', 'quote-details']) $(id).replaceChildren();
+    for (const id of ['result-content', 'timeline', 'quote-details', 'task-list']) $(id).replaceChildren();
     put($('result-empty').querySelector('p'), () => authored('자료 전달이 확인되면') + ' ' + authored('분석 결과가 여기에 나타납니다.'));
     for (const id of ['task-meta', 'quote-price', 'quote-atomic', 'quote-parties', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) put($(id), () => '');
     put($('execution-title'), () => authored('선택한 요청')); $('transaction-link').removeAttribute('href');
   }
   function clearSession() {
+    privateHold = null;
     state.sessionEpoch++; state.selectionEpoch++; state.pendingSelection = null;
     state.busy = false; state.busyOperation = ''; state.busyToken = null; state.wallet = null;
     clearPrivateTasks();
     render();
   }
   async function perform(operation, action) {
-    if (state.busy || state.initializing) return;
+    if (documentSuspended || state.busy || state.initializing) return;
     const token = {};
     clearNotice(); state.busy = true; state.busyOperation = operation; state.busyToken = token;
     render();
@@ -259,6 +364,10 @@
       $('budget').value = amountDisplay(quote.amountAtomic, quote.assetDecimals);
       $('approval-expiry').value = localDate(Math.min(Date.now() + 5 * 60_000, Date.parse(quote.expiresAt) - 1000));
       $('approval-ack').checked = false;
+      if (privateHold?.quote?.id === task.id) {
+        if (sameQuote(privateHold.quote.quote, quote)) { $('budget').value = privateHold.quote.budget; $('approval-expiry').value = privateHold.quote.expiry; }
+        privateHold = null;
+      }
     }
     $('approval-expiry').max = localDate(quote.expiresAt);
     const approved = task.policy === 'ALLOW' && task.approval && !task.approval.revoked;
@@ -367,6 +476,7 @@
     $('restore-task').hidden = !task.archivedAt; $('restore-task').disabled = busy || !authenticated;
   }
   function render() {
+    if (documentSuspended || initialGate) { gateSession(initialGate || restoreButton.hidden); return; }
     renderHealth(); renderHistory(); renderSelection(); updateControls();
     if (announcedWallet !== state.wallet || announcedGeneration !== state.sessionEpoch) {
       announcedWallet = state.wallet; announcedGeneration = state.sessionEpoch; emitSession();
@@ -462,22 +572,27 @@
 
   $('dismiss-notice').addEventListener('click', clearNotice);
   $('connect-wallet').addEventListener('click', () => perform('task.signIn', async () => {
+    const epoch = state.sessionEpoch, operation = state.busyToken;
+    const stillCurrent = () => { if (documentSuspended || state.sessionEpoch !== epoch || state.busyToken !== operation) throw { stale: true }; };
     const provider = window.phantom?.solana ?? window.solana;
     if (!provider?.isPhantom || typeof provider.connect !== 'function' || typeof provider.signMessage !== 'function') throw { code: 'WALLET_NOT_AVAILABLE' };
     let connection, signed;
     try { connection = await provider.connect(); }
     catch { throw { code: 'WALLET_DECLINED' }; }
-    const wallet = connection.publicKey?.toString();
+    stillCurrent(); const wallet = connection.publicKey?.toString();
     if (!wallet) throw { code: 'INVALID_WALLET' };
     const challenge = await api('/api/auth/challenge', 'POST', { wallet });
+    stillCurrent();
     if (typeof challenge.message !== 'string' || typeof challenge.challengeId !== 'string') throw { code: 'RESPONSE_UNAVAILABLE' };
     try { signed = await provider.signMessage(new TextEncoder().encode(challenge.message), 'utf8'); }
     catch { throw { code: 'WALLET_DECLINED' }; }
-    const bytes = signed.signature;
+    stillCurrent(); const bytes = signed.signature;
     if (!(bytes instanceof Uint8Array) || bytes.length !== 64) throw { code: 'INVALID_SIGNATURE' };
     const signature = btoa(String.fromCharCode(...bytes));
     const session = await api('/api/auth/verify', 'POST', { wallet, challengeId: challenge.challengeId, signature });
+    requireExplicitLogin = false;
     if (state.wallet && state.wallet !== session.wallet) {
+      privateHold = null;
       state.sessionEpoch++; state.selectionEpoch++; state.pendingSelection = null;
       // A verified replacement owner gets a clean private surface, while the
       // current sign-in keeps its own busy lease through new-owner loading.
@@ -489,8 +604,18 @@
       state.provider = provider;
       provider.on?.('accountChanged', () => {
         if (!state.wallet) return;
+        const expectedWallet = state.wallet;
+        requireExplicitLogin = true; privateHold = null;
+        if (documentSuspended) {
+          restoreRead++;
+          for (const controller of requests) controller.abort(); requests.clear(); clearSession(); gateSession(false);
+          // This reacts only to the provider's account-change event, never to a
+          // page lifecycle event. The conditional server path revokes only A's
+          // captured token and cannot clear a subsequently replaced B cookie.
+          api('/api/auth/logout', 'POST', { expectedWallet }, {}, { lifecycle: true, keepalive: true }).catch(() => {}); return;
+        }
         clearSession();
-        api('/api/auth/logout', 'POST', {}).catch(() => {});
+        api('/api/auth/logout', 'POST', { expectedWallet }, {}, { keepalive: true }).catch(() => {});
         notice('AUTHENTICATION_REQUIRED');
       });
     }
@@ -603,31 +728,39 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
-  let polling = false;
-  const poll = setInterval(async () => {
-    if (document.hidden || state.busy || polling || !state.wallet) return;
+  let polling = null, poll = null;
+  function stopPolling() { if (poll !== null) clearInterval(poll); poll = null; polling = null; }
+  function startPolling() { if (poll !== null || documentSuspended) return; poll = setInterval(async () => {
+    if (documentSuspended || document.hidden || state.busy || polling || !state.wallet) return;
     updateControls();
     const task = active();
     if (!task || !(['SIGNING', 'PENDING', 'UNKNOWN'].includes(task.payment) || task.delivery === 'PENDING')) return;
-    polling = true;
+    const token = {}; polling = token;
     try { await refreshSelected(); if (!state.busy) render(); }
     catch (error) { if (!error.stale && error.status === 401) clearSession(); }
-    finally { polling = false; }
-  }, 5000);
-  window.addEventListener('pagehide', () => clearInterval(poll), { once: true });
+    finally { if (polling === token) polling = null; }
+  }, 5000); }
+  startPolling();
   $('window-end').value = localDate(Date.now() - 1000);
   $('window-start').value = localDate(Date.now() - 86_400_000);
   render();
   (async () => {
+    let epoch = state.sessionEpoch;
+    await initialTraversal;
+    if (documentSuspended || state.sessionEpoch !== epoch) return;
     try { state.health = await api('/api/health'); } catch { /* keep an unready state */ }
+    if (documentSuspended || state.sessionEpoch !== epoch) return;
     try {
       const session = await api('/api/session');
       state.sessionEpoch++; state.wallet = session.wallet;
+      epoch = state.sessionEpoch;
       emitSession();
       if (!$('report-wallet').value.trim()) $('report-wallet').value = session.wallet;
       await loadTasks();
     } catch (error) { if (!error.stale && error.status !== 401) notice(error.code); }
+    if (documentSuspended || state.sessionEpoch !== epoch) return;
     state.initializing = false;
     render(); emitSession(); flushSelection();
+    restoreGate.hidden = true; layout.inert = false; layout.hidden = false; $('connect-wallet').hidden = false;
   })();
 })();

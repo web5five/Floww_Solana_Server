@@ -26,7 +26,7 @@ async function until(check) {
 // Execute the unmodified browser clients with inert DOM primitives. These tests
 // exercise request ordering, public events and visible text; they do not assert
 // implementation source strings, claim layout coverage, or contact a network.
-function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageDenied = false, hash = '', browser = {} } = {}) {
+function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageDenied = false, hash = '', browser = {}, restoredForms = {} } = {}) {
   const nodes = [], ids = new Map(), intervals = new Map(), timeouts = new Map(), windowEvents = new Map(), events = [], backgroundErrors = [], downloads = [], blobs = new Map(); let timerId = 0;
   const dataKey = key => key.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
   class Node {
@@ -126,10 +126,10 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
   const documentEvents = new Map();
   const document = { addEventListener(type, fn) { const values = documentEvents.get(type) ?? []; values.push(fn); documentEvents.set(type, values); },
     dispatchEvent(event) { for (const fn of documentEvents.get(event.type) ?? []) fn(event); return true; }, hidden: false, body: nodes.find(node => node.tagName === 'BODY'), documentElement: nodes.find(node => node.tagName === 'HTML'), activeElement: null,
-    getElementById: id => ids.get(id) ?? null, createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag),
+    getElementById: id => ids.get(id) ?? nodes.find(node => node.id === id) ?? null, createElement: tag => new Node(tag), createElementNS: (_, tag) => new Node(tag),
     querySelectorAll: selector => select(root, selector), querySelector: selector => select(root, selector)[0] ?? null };
   class Event { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } }
-  const window = { scrollTo() {}, addEventListener(type, fn) { const values = windowEvents.get(type) ?? []; values.push(fn); windowEvents.set(type, values); },
+  const window = { scrollTo() {}, requestAnimationFrame(fn) { queueMicrotask(() => fn(0)); }, addEventListener(type, fn) { const values = windowEvents.get(type) ?? []; values.push(fn); windowEvents.set(type, values); },
     dispatchEvent(event) { events.push(event); for (const fn of windowEvents.get(event.type) ?? []) fn(event); return true; } };
   const historyEntries = [{ url: new URL('https://floww.example/' + hash).href, state: null }], historyWrites = []; let historyIndex = 0;
   const currentURL = () => new URL(historyEntries[historyIndex].url);
@@ -169,10 +169,15 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
     setTimeout(fn, ms) { const id = ++timerId; timeouts.set(id, { fn, ms }); return id; }, clearTimeout(id) { timeouts.delete(id); }, AbortController, URL: BrowserURL, URLSearchParams, Intl, Date,
     TextEncoder, Uint8Array, Float32Array, DataView, Blob, btoa, queueMicrotask, crypto: globalThis.crypto };
   vm.runInNewContext(units + '\n' + locale + '\n' + source, context, { filename: 'browser-client-under-test.js' });
-  return { document, window, nodes, calls, intervals, events, backgroundErrors, get: id => ids.get(id),
+  window.dispatchEvent({ type: 'pageshow', persisted: false });
+  // Native traversal restores form history after pageshow dispatch. This is a
+  // lifecycle double only; actual BFCache/first-paint evidence stays native.
+  for (const [id, value] of Object.entries(restoredForms)) document.getElementById(id).value = value;
+  return { document, window, nodes, calls, intervals, events, backgroundErrors, get: id => document.getElementById(id),
     storage, storageWrites, downloads, historyEntries, historyWrites, timeouts,
     runTimeout(ms) { for (const [id, timer] of [...timeouts]) if (timer.ms === ms) { timeouts.delete(id); timer.fn(); } },
     emitDocument(type, extra = {}) { document.dispatchEvent({ type, ...extra }); },
+    emitPage(type, persisted = true) { window.dispatchEvent({ type, persisted }); },
     emit(type, detail) { window.dispatchEvent(new Event(type, { detail })); },
     // Existing healthy scripted fixtures explicitly supply their local adapter
     // capabilities. Unknown/malformed health tests use real /api/health payloads

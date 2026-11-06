@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id), locale = window.FlowwLocale, copy = locale.copy;
   const state = { wallet: null, generation: null, ready: false, epoch: 0, read: 0, dataEpoch: 0,
     active: document.body.dataset.currentView === 'admin', section: 'overview', role: 'unknown', expires: 0,
-    busy: false, controllers: new Set(), expiryTimer: null, sources: {}, requestLimit: 25, eventLimit: 25 };
+    busy: false, controllers: new Set(), expiryTimer: null, sources: {}, requestLimit: 25, eventLimit: 25, documentSuspended: false };
   const scopes = { runtime: 'current-process', tasks: 'current-persisted-task-states', usage: 'last-seven-utc-days-admitted-role-calls',
     executions: 'last-seven-utc-days-global-ledger-buckets', events: 'newest-retained-task-events', requests: 'current-process' };
   const scopeLabels = { runtime: 'admin.processScope', tasks: 'admin.taskScope', usage: 'admin.usageScope',
@@ -127,8 +127,9 @@
   function expired() { return state.role === 'allowed' && Date.now() >= state.expires; }
   function expireRole() { cancel(); clearData(); state.role = 'unknown'; state.expires = 0; $('admin-open').hidden = true; if (state.active) gate(state.wallet ? 'unavailable' : 'guest'); }
   function armExpiry() { clearTimeout(state.expiryTimer); state.expiryTimer = setTimeout(() => { if (expired()) expireRole(); else if (state.role === 'allowed') armExpiry(); }, Math.min(2_147_483_647, Math.max(1, state.expires - Date.now()))); }
-  const current = lease => lease.epoch === state.epoch && lease.read === state.read && lease.wallet === state.wallet && lease.generation === state.generation;
+  const current = lease => !state.documentSuspended && lease.epoch === state.epoch && lease.read === state.read && lease.wallet === state.wallet && lease.generation === state.generation;
   async function api(path, lease) {
+    if (!current(lease)) throw { stale: true };
     const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15_000); state.controllers.add(controller);
     try {
       const response = await fetch(path, { method: 'GET', credentials: 'same-origin', redirect: 'error', headers: { Accept: 'application/json' }, signal: controller.signal });
@@ -155,6 +156,7 @@
     for (const node of document.querySelectorAll('[data-admin-section]')) node.hidden = node.dataset.adminSection !== state.section && !(state.section === 'overview' && node.dataset.adminSection === 'requests');
   }
   async function load({ data = state.active, focus = false } = {}) {
+    if (state.documentSuspended) return;
     cancel(); if (data) clearData();
     if (!state.ready || !state.wallet) { if (state.active) gate(state.ready ? 'guest' : 'checking'); return; }
     const lease = { epoch: state.epoch, read: state.read, wallet: state.wallet, generation: state.generation };
@@ -334,6 +336,7 @@
     if (active) load({ data: true, focus: true });
   });
   window.addEventListener('floww:session', event => {
+    if (state.documentSuspended) return;
     const wallet = event.detail?.wallet ?? null, generation = Number.isInteger(event.detail?.generation) ? event.detail.generation : null, ready = event.detail?.initializing !== true;
     const changed = wallet !== state.wallet || (state.generation !== null && generation !== null && generation !== state.generation);
     const becameReady = ready && !state.ready; state.ready = ready;
@@ -344,6 +347,8 @@
     if (expired()) expireRole();
   });
   window.addEventListener('focus', () => { if (expired()) expireRole(); });
+  window.addEventListener('floww:document-suspend', () => { state.documentSuspended = true; cancel(); clearData(); clearTimeout(state.expiryTimer); state.epoch++; state.ready = false; state.role = 'unknown'; state.expires = 0; $('admin-open').hidden = true; if (state.active) gate('checking'); });
+  window.addEventListener('floww:document-resume', () => { state.documentSuspended = false; });
   window.addEventListener('pagehide', () => { cancel(); clearData(); if (state.active) gate(state.wallet ? 'unavailable' : 'guest'); });
   const initial = /^#\/admin(?:\/(requests|events))?$/.exec(window.location.hash);
   if (initial?.[1]) state.section = initial[1];

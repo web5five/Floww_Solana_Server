@@ -2,6 +2,10 @@
 (() => {
   'use strict';
   const COPY = {
+  "lifecycle.checking": ["로그인 확인 중", "Checking your session"],
+  "lifecycle.checkingCopy": ["현재 로그인 상태를 확인한 뒤 화면을 엽니다.", "Your workspace opens after your current session is checked."],
+  "lifecycle.unavailable": ["로그인을 확인하지 못했습니다. 연결을 다시 확인해 주세요.", "Your session could not be verified. Check the connection again to continue."],
+  "lifecycle.retry": ["로그인 상태 다시 확인", "Check session again"],
   "voice.modeOptions": ["음성 대화 방식 선택", "Choose a voice interaction"],
   "voice.mode": ["이번에 사용할 방식", "Mode for this turn"],
   "voice.reviewMode": ["글을 검토한 뒤 직접 보내기", "Review text before sending"],
