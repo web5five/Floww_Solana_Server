@@ -171,6 +171,39 @@ class PresentationTests(unittest.TestCase):
             if field.name not in ("answer_text", "limitations"):
                 self.assertEqual(getattr(result, field.name), getattr(self.answer, field.name))
 
+    def test_v2_stored_suffixes_are_readable_and_replaced_by_one_neutral_v3_preference(self):
+        legacy = {
+            ("ko", "summary"): "출력 조건: 한국어로 반환된 이체를 요약합니다.",
+            ("ko", "incoming"): "출력 조건: 한국어로 반환된 입금만 요약합니다.",
+            ("ko", "outgoing"): "출력 조건: 한국어로 반환된 출금만 요약합니다.",
+            ("ko", "count"): "출력 조건: 한국어로 반환된 이체의 건수만 설명합니다.",
+            ("en", "summary"): "Output: Summarize returned transfers in English.",
+            ("en", "incoming"): "Output: Summarize incoming transfers only in English.",
+            ("en", "outgoing"): "Output: Summarize outgoing transfers only in English.",
+            ("en", "count"): "Output: Show only transfer counts in English.",
+        }
+        for key, suffix in legacy.items():
+            with self.subTest(options=key):
+                options = OutputOptions(*key); old = "Identify the wallet owner's real name.\n" + suffix
+                self.assertEqual(infer_output_options(old), options)
+                self.assertEqual(derive_output_options(["Keep my presentation."], old, "ko"), options)
+                changed = with_output_options(old, options)
+                self.assertEqual(changed.splitlines()[0], "Identify the wallet owner's real name.")
+                self.assertEqual(len(changed.splitlines()), 2)
+                self.assertNotIn(suffix, changed)
+                self.assertEqual(infer_output_options(changed), options)
+                self.assertEqual(with_output_options(changed, options), changed)
+
+    def test_unsupported_goal_keeps_its_goal_and_only_gets_a_neutral_output_format(self):
+        for goal, options in (("Calculate the investment profit.", OutputOptions("en")),
+                              ("지갑 소유자의 실명을 알려 주세요.", OutputOptions("ko"))):
+            with self.subTest(goal=goal):
+                purpose = with_output_options(goal, options)
+                self.assertEqual(purpose.splitlines()[0], goal)
+                self.assertNotIn("Summarize returned transfers", purpose)
+                self.assertNotIn("반환된 이체를 요약", purpose)
+                self.assertEqual(infer_output_options(purpose), options)
+
     def test_output_contract_cannot_truncate_or_invent_a_goal(self):
         for purpose in ("", " " * 5, "x" * 2_000):
             with self.subTest(length=len(purpose)):

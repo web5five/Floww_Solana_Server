@@ -25,10 +25,11 @@ from .workspace_cli import (
     RESOURCE, handle,
 )
 
-VERSION = "workspace-live-acceptance/v2"
+VERSION = "workspace-live-acceptance/v3"
 MODEL = "gpt-5.4-mini"
 BASELINE_SUITE_HASH = "1000fdca31768a038645e48f9d775e24c5556a66d244d952189ab1d461602295"
-DEFAULT_SUITE = Path(__file__).resolve().parents[1] / "evaluations" / "workspace-live-acceptance-v2.json"
+PREVIOUS_SUITE_HASH = "2b03b72b696a7b0acc85515debe744b828fc03f060f294e6c5cc00d1c111de6f"
+DEFAULT_SUITE = Path(__file__).resolve().parents[1] / "evaluations" / "workspace-live-acceptance-v3.json"
 OPERATIONS = {"refine", "plan", "critic_probe"}
 _SECRET = re.compile(r"sk-[A-Za-z0-9_-]{12,}|Bearer\s+\S+|-----BEGIN[^\n]*PRIVATE KEY-----", re.I)
 _URL = re.compile(r"[a-z][a-z0-9+.-]*://|\bwww\.", re.I)
@@ -70,6 +71,7 @@ def validate_suite(suite):
     if (type(suite) is not dict or suite.get("version") != VERSION or suite.get("model") != MODEL
             or suite.get("promptVersion") != PROMPT_VERSION or suite.get("split") != "post-baseline-regression"
             or suite.get("originalPreSampleSuiteHash") != BASELINE_SUITE_HASH or suite.get("sameCasesAsBaseline") is not True
+            or suite.get("previousRegressionSuiteHash") != PREVIOUS_SUITE_HASH
             or suite.get("historyLimit") != 12 or suite.get("humanReviewed") is not False
             or suite.get("expectedCases") != 12 or suite.get("expectedStages") != 32
             or suite.get("maxRoleCalls") != 40 or suite.get("generatedPlanStages") != 8
@@ -325,11 +327,15 @@ def run_suite(suite, *, model, execution_kind, model_name=MODEL, on_event=None):
     for case in suite["cases"]:
         state = copy.deepcopy(case["initial"])
         history, intent = state["history"], state["intent"]
+        refiner_status, refiner_stage, refiner_validated = None, None, False
         stages = []
         expected_language = case["inputLanguage"]
         for index, stage in enumerate(case["stages"]):
             if recorder.failure:
-                stages.append({"id": stage["id"], "outcome": "NOT_RUN_AFTER_FAILURE", "automatedPassed": False, "rolePortAttempts": 0})
+                stages.append({"id": stage["id"], "operation": stage["operation"],
+                    "outcome": "NOT_RUN_AFTER_FAILURE", "automatedPassed": False, "rolePortAttempts": 0,
+                    "workflow": {"decision": "NOT_RUN_AFTER_FAILURE", "priorRefinerStageId": refiner_stage,
+                        "priorRefinerStatus": refiner_status, "priorRefinerValidated": refiner_validated}})
                 continue
             if stage["userText"] is not None:
                 history.append({"id": case["id"] + "-user-" + str(index), "role": "user", "text": stage["userText"]})
@@ -340,30 +346,51 @@ def run_suite(suite, *, model, execution_kind, model_name=MODEL, on_event=None):
                    "memories": state["memories"], "catalog": state["catalog"], "nowIso": stage["at"]}
             recorder.tag = (case["id"], stage["id"])
             before, rows_before = recorder.attempts, len(recorder.rows)
-            port = _CriticProbe(recorder, stage["fixtureProposal"]) if stage["operation"] == "critic_probe" else recorder
-            result = handle("refine" if stage["operation"] == "refine" else "plan", raw,
-                            model=port, model_version=model_name)
+            eligible = refiner_validated and refiner_status == "READY_TO_PLAN"
+            blocked = stage["operation"] == "plan" and not eligible
+            workflow = {"priorRefinerStageId": refiner_stage, "priorRefinerStatus": refiner_status,
+                "priorRefinerValidated": refiner_validated,
+                "decision": "WORKFLOW_BLOCKED" if blocked else "RUN_REFINE" if stage["operation"] == "refine"
+                else "INDEPENDENT_CRITIC_PROBE" if stage["operation"] == "critic_probe" else "PLAN_AFTER_READY"}
+            if blocked:
+                # Intent completeness is not workflow authority. Never repair
+                # or replace a non-READY/invalid refiner using the case oracle.
+                result = {"status": "STOPPED", "code": "WORKFLOW_BLOCKED"}
+            else:
+                port = _CriticProbe(recorder, stage["fixtureProposal"]) if stage["operation"] == "critic_probe" else recorder
+                result = handle("refine" if stage["operation"] == "refine" else "plan", raw,
+                                model=port, model_version=model_name)
             roles = recorder.rows[rows_before:]
             try:
                 checks, presentation = _score(suite, stage, result, roles)
             except Exception:
                 checks, presentation = {"scoringProtocol": False}, None
+            if blocked:
+                checks["workflowReady"] = False
             attempted = recorder.attempts - before
             outcome = ("ARTIFACT_WRITE_FAILED" if recorder.failure_origin == "ARTIFACT" else
                        "CALL_LIMIT_BLOCKED" if recorder.failure_origin == "CALL_LIMIT" else
-                       "PORT_FAILED" if recorder.failure else "GUARD_ONLY" if not attempted else "EVALUATED")
+                       "PORT_FAILED" if recorder.failure else "WORKFLOW_BLOCKED" if blocked
+                       else "GUARD_ONLY" if not attempted else "EVALUATED")
             # Prior intent comes only from an actual validated refiner result.
             # Never substitute the expected oracle or repair a failed output.
-            if stage["operation"] == "refine" and type(result.get("intent")) is dict:
-                intent = copy.deepcopy(result["intent"])
-                history.append({"id": case["id"] + "-assistant-" + str(index), "role": "assistant", "text": result["assistantText"]})
-                history = history[-suite["historyLimit"]:]
+            if stage["operation"] == "refine":
+                refiner_stage, refiner_status = stage["id"], result.get("status")
+                refiner_validated = (refiner_status in {"READY_TO_PLAN", "CLARIFICATION_REQUIRED", "UNSUPPORTED"}
+                                     and type(result.get("intent")) is dict)
+                if refiner_validated:
+                    intent = copy.deepcopy(result["intent"])
+                    history.append({"id": case["id"] + "-assistant-" + str(index), "role": "assistant", "text": result["assistantText"]})
+                    history = history[-suite["historyLimit"]:]
+            workflow.update(refinerStageIdAfter=refiner_stage, refinerStatusAfter=refiner_status,
+                            refinerValidatedAfter=refiner_validated)
             row = {"id": stage["id"], "operation": stage["operation"], "outcome": outcome,
                 "rolePortAttempts": attempted, "automatedPassed": outcome == "EVALUATED" and all(checks.values()),
                 "checks": checks, "result": _safe_record(result), "presentation": presentation,
+                "workflow": workflow,
                 "historyMessages": len(raw["messages"]), "inputDigest": _hash(raw),
-                "plannerSource": "injected_negative_fixture" if stage["operation"] == "critic_probe" else "explicit_model_port" if stage["operation"] == "plan" else None,
-                "qualitativeReview": {"status": "PENDING", "reviewerKind": None, "humanReviewed": False,
+                "plannerSource": "injected_negative_fixture" if stage["operation"] == "critic_probe" else "explicit_model_port" if stage["operation"] == "plan" and not blocked else None,
+                "qualitativeReview": {"status": "NOT_RUN_WORKFLOW_BLOCKED" if blocked else "PENDING", "reviewerKind": None, "humanReviewed": False,
                     "expectedUserFacingLanguage": None if stage["operation"] == "critic_probe" else expected_language}}
             stages.append(row)
             if not recorder.failure:
@@ -378,6 +405,8 @@ def run_suite(suite, *, model, execution_kind, model_name=MODEL, on_event=None):
     return {"suiteVersion": VERSION, "suiteHash": _hash(suite), "model": model_name, "promptVersion": PROMPT_VERSION,
         "comparisonSplit": suite["split"], "sameCasesAsBaseline": True,
         "baselineSuiteHash": suite["originalPreSampleSuiteHash"],
+        "previousRegressionSuiteHash": suite["previousRegressionSuiteHash"],
+        "workflowPolicy": "plan-requires-latest-validated-ready-refiner",
         "validatedPurposeMayIncludeDeterministicUserOutputContract": True,
         "promptHash": _hash([REFINE_INSTRUCTION, PLAN_INSTRUCTION, CRITIC_INSTRUCTION]), "executionKind": execution_kind,
         "requiresExternalHardSupervisor": True, "costMeter": "external_actual_post_usage_and_conservative_reservations",
@@ -387,6 +416,10 @@ def run_suite(suite, *, model, execution_kind, model_name=MODEL, on_event=None):
             "modelPortInvocations": recorder.invocations,
             "returnedRoleCalls": sum(row["state"] == "RETURNED" for row in recorder.rows),
             "automatedPassedCases": sum(case["automatedPassed"] for case in cases),
+            "automatedPassedStages": sum(stage["automatedPassed"] for stage in flat),
+            "automatedFailedStages": sum(not stage["automatedPassed"] for stage in flat),
+            "workflowBlockedStages": sum(stage["outcome"] == "WORKFLOW_BLOCKED" for stage in flat),
+            "attemptedPlanStages": sum(stage.get("operation") == "plan" and stage["rolePortAttempts"] > 0 for stage in flat),
             "evaluatedStages": sum(stage["outcome"] == "EVALUATED" for stage in flat),
             "guardOnlyStages": sum(stage["outcome"] == "GUARD_ONLY" for stage in flat),
             "portFailedStages": sum(stage["outcome"] == "PORT_FAILED" for stage in flat),

@@ -59,12 +59,12 @@ async function fixture(env = {}) {
       const intent = { ...input.intent, purpose: input.intent.purpose ?? 'Observe transfer activity' };
       intent.missingFields = ['purpose', 'wallet', 'windowStart', 'windowEnd'].filter(key => !intent[key]);
       return { status: intent.missingFields.length ? 'CLARIFICATION_REQUIRED' : 'READY_TO_PLAN', assistantText: 'Runtime fixture only', intent,
-        executionKind: 'live_model_intent_refinement', modelVersion: config.model, promptVersion: 'workspace/v2' };
+        executionKind: 'live_model_intent_refinement', modelVersion: config.model, promptVersion: 'workspace/v3' };
     },
     plan: async () => {
       plans++; return { status: 'PROPOSED', summary: 'Runtime fixture only', limitations: ['Scripted test'],
         steps: [{ role: 'planner', capability: 'wallet-transfers', resourceId: 'wallet-transfers', reason: 'Explicit wallet/window' }],
-        executionKind: 'live_model_planner_critic', modelVersion: config.model, promptVersion: 'workspace/v2' };
+        executionKind: 'live_model_planner_critic', modelVersion: config.model, promptVersion: 'workspace/v3' };
     },
   };
   try {

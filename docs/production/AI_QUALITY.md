@@ -37,7 +37,7 @@ one valid English reporting plan was falsely rejected for explaining that human
 approval was required and no execution had occurred. Exact wallet/start/end
 checks matched in all22 refinement stages; that does not erase these failures.
 
-## Version2 output contract
+## Output contract
 
 The message endpoint accepts optional `interfaceLanguage` with only `ko` or
 `en`. It is validated before message persistence and model-quota admission,
@@ -68,22 +68,54 @@ language compliance, faithful recovery and accurate critic explanations need
 actual samples and semantic review. A canonical suffix or critic `ACCEPT`
 cannot prove them.
 
-The `workspace/v2` prompts distinguish a newly supported goal from unsupported
-words quoted or replaced in earlier turns. They distinguish an actual authority
-request from a no-execution/human-approval boundary. Existing schema, explicit
-scope, registered-resource, secret, URL and authority guards remain in force.
-No automatic retry or bypass of a rejecting critic is introduced.
+The current `workspace/v3` refiner follows a short ordered contract: current
+goal, exact user-derived scope anchors, missing fields recomputed from returned
+nulls, then status. The schema fixes wallet/start/end to those anchors, including
+null when unresolved. The validator rejects clearing a known anchor, inventing
+an unknown one, contradictory missing fields and asking for clarification when
+the scope is already valid and complete. It never changes such a response into
+`READY_TO_PLAN`. A submillisecond interval fails closed rather than being silently
+truncated into a different scope.
+
+The critic distinguishes an unsupported capability claim from a statement that
+the capability is unavailable, and an authority grant from a requirement for
+later human approval. Existing scope, registered-resource, secret, URL and
+authority guards remain in force. No automatic retry or bypass of a rejecting
+critic is introduced. New output suffixes describe presentation only; they do
+not turn an unsupported balance question into a transfer task. Stored version2
+suffixes remain readable and are replaced idempotently on a new refinement.
+
+## Retained version2 failure
+
+The version2 sample at source `250b74e292488df0841a3047f85274f98ddaa6ae`
+returned34 core roles plus4 interface-language probe roles. Core acceptance
+remained7/12 cases, with29 evaluated and3 guard-only stages. The two separate
+interface probes passed. All38 actual POSTs had usage receipts; the conservative
+usage calculation was$0.06479775. No failed output was retried or replaced.
+
+Independent agent review found contradictory Korean completion, lost Korean
+corrections, inconsistent missing fields and an English critic false rejection.
+Natural Korean plan wording and interface-language handling improved in the
+observed calls. One plan followed a non-ready refiner result only because the
+old evaluator invoked the component independently. That is component evidence,
+not product workflow success. The original sample and review are retained.
 
 ## Repeatable acceptance
 
 The source corpus is
-[`workspace-live-acceptance-v2.json`](../../reference/evaluations/workspace-live-acceptance-v2.json).
+[`workspace-live-acceptance-v3.json`](../../reference/evaluations/workspace-live-acceptance-v3.json).
 Its original cases, rubric, expected labels, fixture facts and role denominators
 are unchanged. Its split is explicitly `post-baseline-regression`; the same
 examples are no longer an unseen acceptance set. The result also states that
 validated purpose may include the production's deterministic user-output binding.
 Raw model DTOs are retained separately, so a product option match must not be
 reported as an improvement in raw model language quality.
+
+The version3 evaluator advances an automatic plan only after an actual validated
+`READY_TO_PLAN` result. A non-ready/invalid refinement produces a failed
+`WORKFLOW_BLOCKED` plan stage with no provider call. All12 cases/32 stages stay
+in the denominator; a later independent case or real correction can still run.
+This gate uses observed state, never an expected answer or repaired model DTO.
 
 From a source checkout:
 
@@ -107,7 +139,9 @@ transfer retrieval, model arithmetic, payment, microphone or public deployment
 acceptance. Actual-person review remains distinct from controller/agent review,
 consistent with [OpenAI's evaluation guidance](https://developers.openai.com/api/docs/guides/evaluation-best-practices).
 
-The first version2 live regression and separate interface-language integration
-probes are pending. Current local checks pass618 Node tests with required owned
-PostgreSQL and242 Python tests. The actual-provider and exact-source CI release
-gates must be recorded separately after execution.
+Version3 integration and actual-provider reevaluation are in progress. Before
+new provider calls, the controller binds the frozen evaluator and production
+sources, obtains independent source/supervisor review and keeps prior costs in
+the cumulative$1 authorization. The pre-version3 conservative total is
+$0.57766650, including a historical$0.45 reserve and both retained samples.
+Local checks, actual-provider results and exact-source CI remain separate gates.

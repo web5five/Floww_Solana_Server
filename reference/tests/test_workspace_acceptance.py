@@ -2,6 +2,7 @@
 
 import copy
 import importlib.util
+import hashlib
 import json
 import sys
 import tempfile
@@ -80,6 +81,7 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.suite["split"], "post-baseline-regression")
         self.assertTrue(self.suite["sameCasesAsBaseline"])
         self.assertEqual(self.suite["originalPreSampleSuiteHash"], acceptance.BASELINE_SUITE_HASH)
+        self.assertEqual(self.suite["previousRegressionSuiteHash"], acceptance.PREVIOUS_SUITE_HASH)
         for bad in ({"maxRoleCalls": 41}, {"expectedCases": 11}, {"model": "other-model"}, {"humanReviewed": True}):
             value = copy.deepcopy(self.suite); value.update(bad)
             with self.assertRaises(acceptance.InvalidAcceptance):
@@ -87,6 +89,17 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
         value = copy.deepcopy(self.suite); value["cases"][1]["id"] = value["cases"][0]["id"]
         with self.assertRaises(acceptance.InvalidAcceptance):
             acceptance.validate_suite(value)
+
+    def test_v3_changes_only_version_prompt_and_previous_hash_while_v2_bytes_and_core_are_unchanged(self):
+        previous = ROOT / "evaluations" / "workspace-live-acceptance-v2.json"
+        self.assertEqual(hashlib.sha256(previous.read_bytes()).hexdigest(), "e7075803eac9a34866d07a68ff45bafae4876f16d69b4591ea646c1a371f3a3b")
+        v2 = json.loads(previous.read_text())
+        self.assertEqual(acceptance._hash(v2), acceptance.PREVIOUS_SUITE_HASH)
+        expected = copy.deepcopy(v2); expected.update(version="workspace-live-acceptance/v3", promptVersion="workspace/v3",
+            previousRegressionSuiteHash=acceptance.PREVIOUS_SUITE_HASH)
+        self.assertEqual(self.suite, expected)
+        for field in ("cases", "grounding", "rubric", "expectedRoleCounts"):
+            self.assertEqual(self.suite[field], v2[field])
 
     def test_scripted_complete_run_preserves_denominators_and_never_claims_quality_or_person_review(self):
         report, model = self.run_suite()
@@ -96,13 +109,16 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
         self.assertEqual(report["totals"]["generatedPlanStages"], 8)
         self.assertEqual(report["totals"]["criticOnlyStages"], 2)
         self.assertEqual(report["totals"]["rolePortAttempts"], 40)
+        self.assertEqual(report["totals"]["workflowBlockedStages"], 0)
+        self.assertEqual(report["totals"]["automatedPassedStages"], 32)
+        self.assertEqual(report["totals"]["automatedFailedStages"], 0)
         self.assertFalse(report["modelQualityAccepted"]); self.assertFalse(report["humanReviewed"])
         self.assertTrue(report["requiresExternalHardSupervisor"])
         self.assertTrue(all(stage["qualitativeReview"]["status"] == "PENDING" for case in report["cases"] for stage in case["stages"]))
 
     def test_expected_oracles_and_grading_rubric_never_enter_any_role_payload(self):
         _, model = self.run_suite()
-        forbidden = {"expected", "rubric", "issueAnyOf", "maxRoleCalls", "qualitativeReview", "automatedPassed"}
+        forbidden = {"expected", "rubric", "issueAnyOf", "maxRoleCalls", "qualitativeReview", "automatedPassed", "workflow", "priorRefinerStatus"}
         def keys(value):
             if isinstance(value, dict):
                 return set(value) | set().union(*(keys(item) for item in value.values()))
@@ -111,6 +127,59 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
             return set()
         for _, data, _ in model.calls:
             self.assertFalse(keys(data) & forbidden)
+
+    def test_complete_intent_with_actual_nonready_status_blocks_plan_without_hiding_failure_or_later_refine(self):
+        model = ScriptedRoles(self.suite); original = model.role
+        target = "ko-relative-freeze-cross-language"
+        def nonready(role, data, schema):
+            result = original(role, data, schema)
+            if role == "refine" and data["messages"][-1]["id"] == target + "-user-0":
+                result["status"] = "UNSUPPORTED"
+            return result
+        model.role = nonready; events = []
+        report = acceptance.run_suite(self.suite, model=model, execution_kind="scripted_roles", on_event=events.append)
+        case = next(case for case in report["cases"] if case["id"] == target)
+        first, blocked, later = case["stages"]
+        self.assertEqual(first["result"]["intent"]["missingFields"], [])
+        self.assertTrue(all(first["result"]["intent"][key] is not None for key in ("purpose", "wallet", "windowStart", "windowEnd", "resourceId")))
+        self.assertEqual(first["result"]["status"], "UNSUPPORTED")
+        self.assertEqual(blocked["outcome"], "WORKFLOW_BLOCKED")
+        self.assertEqual(blocked["result"], {"status": "STOPPED", "code": "WORKFLOW_BLOCKED"})
+        self.assertEqual(blocked["rolePortAttempts"], 0); self.assertFalse(blocked["automatedPassed"])
+        self.assertIsNone(blocked["plannerSource"])
+        self.assertEqual(blocked["workflow"]["priorRefinerStatus"], "UNSUPPORTED")
+        self.assertTrue(blocked["workflow"]["priorRefinerValidated"])
+        self.assertEqual(blocked["qualitativeReview"]["status"], "NOT_RUN_WORKFLOW_BLOCKED")
+        self.assertEqual(later["result"]["status"], "READY_TO_PLAN"); self.assertEqual(later["rolePortAttempts"], 1)
+        self.assertEqual(len(model.calls), 38); self.assertEqual(report["totals"]["expectedStages"], 32)
+        self.assertEqual(report["totals"]["automatedPassedStages"], 30); self.assertEqual(report["totals"]["automatedFailedStages"], 2)
+        self.assertEqual(report["totals"]["workflowBlockedStages"], 1); self.assertEqual(report["totals"]["attemptedPlanStages"], 7)
+        self.assertEqual(report["totals"]["plannedRoleCalls"], 40); self.assertIsNone(report["stoppedCode"])
+        controls = [case for case in report["cases"] if case["family"] == "critic-stale-proposal"]
+        self.assertTrue(all(case["automatedPassed"] for case in controls)); self.assertEqual(len(controls), 2)
+        self.assertTrue(all(case["automatedPassed"] for case in report["cases"] if case["id"] != target))
+        self.assertEqual(len([event for event in events if event["event"] == "stage_result"]), 32)
+        self.assertFalse(any(row["caseId"] == target and row["stageId"] == "later-plan" for row in report["roles"]))
+
+    def test_invalid_complete_clarification_cannot_be_treated_as_a_ready_refiner_for_plan(self):
+        model = ScriptedRoles(self.suite); original = model.role
+        target = "en-relative-freeze-cross-language"
+        def contradictory(role, data, schema):
+            result = original(role, data, schema)
+            if role == "refine" and data["messages"][-1]["id"] == target + "-user-0":
+                result["status"] = "CLARIFICATION_REQUIRED"
+            return result
+        model.role = contradictory; report, _ = self.run_suite(model)
+        case = next(case for case in report["cases"] if case["id"] == target)
+        first, blocked, later = case["stages"]
+        self.assertEqual(first["result"], {"status": "STOPPED", "code": "WORKSPACE_INVALID_MODEL_OUTPUT"})
+        self.assertEqual(blocked["outcome"], "WORKFLOW_BLOCKED"); self.assertEqual(blocked["rolePortAttempts"], 0)
+        self.assertEqual(blocked["workflow"]["priorRefinerStatus"], "STOPPED")
+        self.assertFalse(blocked["workflow"]["priorRefinerValidated"])
+        self.assertEqual(later["rolePortAttempts"], 1)
+        self.assertEqual(report["totals"]["expectedStages"], 32); self.assertEqual(len(model.calls), 38)
+        self.assertTrue(all(case["automatedPassed"] for case in report["cases"] if case["id"] != target))
+        self.assertFalse(report["modelQualityAccepted"]); self.assertFalse(report["humanReviewed"])
 
     def test_actual_model_goal_and_assistant_are_preserved_when_production_binds_user_output_preferences(self):
         model = ScriptedRoles(self.suite)
@@ -236,6 +305,12 @@ class WorkspaceAcceptanceTests(unittest.TestCase):
         self.assertNotIn("private payload", json.dumps(report))
         self.assertNotIn("private_unexpected_field", json.dumps(report))
         self.assertTrue(any(role.get("output", {}).get("unexpectedFieldsRedacted") for role in report["roles"]))
+        self.assertEqual(report["totals"]["workflowBlockedStages"], 8)
+        self.assertEqual(report["totals"]["attemptedPlanStages"], 0)
+        self.assertEqual(report["totals"]["rolePortAttempts"], 24)
+        self.assertEqual(report["totals"]["expectedStages"], 32)
+        blocked = [stage for case in report["cases"] for stage in case["stages"] if stage["outcome"] == "WORKFLOW_BLOCKED"]
+        self.assertTrue(all(not stage["workflow"]["priorRefinerValidated"] and stage["workflow"]["priorRefinerStatus"] == "STOPPED" for stage in blocked))
 
 
 if __name__ == "__main__":

@@ -139,7 +139,7 @@ export function mountWorkspace(app, { repo, planner, mandates }, context) {
   function validateModelOutput(result, operation) {
     const metadata = ['executionKind', 'modelVersion', 'promptVersion'];
     exact(result, operation === 'refine' ? ['status', 'assistantText', 'intent', ...metadata] : ['status', 'summary', 'steps', 'limitations', ...metadata]);
-    if (result.modelVersion !== config.model || result.promptVersion !== 'workspace/v2' ||
+    if (result.modelVersion !== config.model || result.promptVersion !== 'workspace/v3' ||
         result.executionKind !== (operation === 'refine' ? 'live_model_intent_refinement' : 'live_model_planner_critic')) fail('INVALID_PLANNER_OUTPUT', 502);
     if (operation === 'refine') {
       if (!['READY_TO_PLAN', 'CLARIFICATION_REQUIRED', 'UNSUPPORTED'].includes(result.status)) fail('INVALID_PLANNER_OUTPUT', 502);

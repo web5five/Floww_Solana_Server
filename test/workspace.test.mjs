@@ -52,7 +52,7 @@ async function setup({ sessionTtlMs = 8 * 3600_000, ownerModelDailyLimit = 100, 
       intent.missingFields = ['purpose', 'wallet', 'windowStart', 'windowEnd', 'resourceId'].filter(field => intent[field] === null);
       return { status: intent.missingFields.length ? 'CLARIFICATION_REQUIRED' : 'READY_TO_PLAN',
         assistantText: 'MODEL_PRIVATE_MARKER: scope reviewed.', intent, executionKind: 'live_model_intent_refinement',
-        modelVersion: MODEL, promptVersion: 'workspace/v2' };
+        modelVersion: MODEL, promptVersion: 'workspace/v3' };
     },
     async plan(input, options) {
       plans++; inputs.push(structuredClone(input)); await control.planHook?.(input, options);
@@ -60,7 +60,7 @@ async function setup({ sessionTtlMs = 8 * 3600_000, ownerModelDailyLimit = 100, 
       return { status: 'PROPOSED', summary: 'Inspect bounded observed transfer activity.',
         steps: [{ role: 'planner', capability: RESOURCE, resourceId: RESOURCE, reason: 'Fits the explicitly selected observation scope.' }],
         limitations: ['Only observed transfers are covered.'], executionKind: 'live_model_planner_critic',
-        modelVersion: MODEL, promptVersion: 'workspace/v2' };
+        modelVersion: MODEL, promptVersion: 'workspace/v3' };
     },
   };
   server.on('request', createApp({ config, store, gateway, ai: { propose: financial, consume: financial },

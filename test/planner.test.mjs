@@ -203,7 +203,7 @@ test('credentials stay out of argv, unrelated environment, diagnostics and even 
     const source = 'import json,os,sys\n' +
       `open(${JSON.stringify(evidence)},'w').write(json.dumps({'argv':sys.argv,'env':dict(os.environ)}))\n` +
       "sys.stderr.write(os.environ['FLOWW_AI_API_KEY'])\n" +
-      `print(json.dumps({'status':'READY_TO_PLAN','assistantText':os.environ['FLOWW_AI_API_KEY'],'intent':${JSON.stringify(payload().intent).replaceAll('null', 'None')},'executionKind':'live_model_intent_refinement','modelVersion':os.environ['FLOWW_AI_MODEL'],'promptVersion':'workspace/v2'}))\n`;
+      `print(json.dumps({'status':'READY_TO_PLAN','assistantText':os.environ['FLOWW_AI_API_KEY'],'intent':${JSON.stringify(payload().intent).replaceAll('null', 'None')},'executionKind':'live_model_intent_refinement','modelVersion':os.environ['FLOWW_AI_MODEL'],'promptVersion':'workspace/v3'}))\n`;
     const python = await executable(directory, 'inspect', source);
     process.env.FLOWW_UNRELATED_SECRET_FOR_TEST = 'never-inherit';
     const escapedKey = 'dummy-"quoted\\credential';

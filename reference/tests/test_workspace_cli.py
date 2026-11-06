@@ -69,6 +69,189 @@ def run(operation, data, model, **kwargs):
 
 
 class WorkspaceRoleTests(unittest.TestCase):
+    def test_excluded_wallet_is_never_promoted_to_a_schema_anchor(self):
+        for phrase in (
+            "Do not use wallet " + OTHER + "; keep the currently selected wallet and period.",
+            "Do not use the wallet " + OTHER + "; keep the currently selected wallet and period.",
+            "Don't use address " + OTHER + "; keep my wallet.",
+            OTHER + " 지갑은 사용하지 말고 현재 지갑과 기간은 유지해 주세요.",
+            "Do not change wallet " + WALLET + "; keep the period.",
+        ):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                self.assertEqual(normalize(data)["explicitScopeAnchors"]["wallet"], WALLET)
+                model = ScriptedModel(refined(data)); result = run("refine", data, model)
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+                self.assertEqual(model.calls[0][2]["properties"]["intent"]["properties"]["wallet"]["enum"], [WALLET])
+
+    def test_excluded_current_wallet_requires_a_replacement_and_cannot_be_reused(self):
+        data = payload(); data["messages"][-1]["text"] = "Do not use wallet " + WALLET + "."
+        self.assertIsNone(normalize(data)["explicitScopeAnchors"]["wallet"])
+        self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
+        for phrase in ("Do not use wallet " + WALLET + "; use " + OTHER + ".",
+                       WALLET + " 말고 " + OTHER + " 지갑을 사용해 주세요."):
+            data["messages"][-1]["text"] = phrase
+            self.assertEqual(normalize(data)["explicitScopeAnchors"]["wallet"], OTHER)
+
+    def test_explicit_current_scope_exclusion_without_replacement_cannot_reuse_snapshot(self):
+        for phrase, fields in (
+            ("Do not use the current wallet; I will provide another one later.", ("wallet",)),
+            ("Do not use the current wallet; avoid address " + OTHER + " too. I will provide another wallet later.", ("wallet",)),
+            ("현재 지갑은 사용하지 말고 다른 주소는 나중에 알려드릴게요.", ("wallet",)),
+            ("Avoid my existing period; I will provide a different one later.", ("windowStart", "windowEnd")),
+            ("Avoid my existing period; do not use 2026-11-01T00:00:00Z to 2026-11-02T00:00:00Z either.", ("windowStart", "windowEnd")),
+            ("기존 기간은 사용하지 마세요.", ("windowStart", "windowEnd")),
+            ("Do not use the last 24 hours; I will provide a different period later.", ("windowStart", "windowEnd")),
+        ):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                data["intent"].update(windowStart="2026-11-05T12:00:00Z", windowEnd="2026-11-06T12:00:00Z")
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertTrue(all(anchors[field] is None for field in fields))
+                self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
+
+    def test_coordinated_exclusions_do_not_select_the_second_target(self):
+        data = payload(); data["messages"][-1]["text"] = (
+            "Do not use wallet " + WALLET + " or " + OTHER + ". I will provide another wallet later.")
+        self.assertIsNone(normalize(data)["explicitScopeAnchors"]["wallet"])
+        data["messages"][-1]["text"] = (
+            "Do not use 2026-11-05T12:00:00Z through 2026-11-06T11:00:00Z or "
+            "2026-11-03T00:00:00Z through 2026-11-04T00:00:00Z.")
+        self.assertIsNone(normalize(data)["explicitScopeAnchors"]["windowStart"])
+        for join in ("; use ", ", use ", " but use ", ". Use "):
+            data["messages"][-1]["text"] = "Do not use wallet " + WALLET + join + OTHER + "."
+            self.assertEqual(normalize(data)["explicitScopeAnchors"]["wallet"], OTHER)
+
+    def test_excluded_iso_and_relative_periods_do_not_replace_selected_scope(self):
+        for phrase in (
+            "Do not use 2026-11-01T00:00:00Z through 2026-11-02T00:00:00Z; keep the currently selected wallet and period.",
+            "Do not use the last 24 hours; keep the currently selected wallet and period.",
+            "2026-11-01T00:00:00Z부터 2026-11-02T00:00:00Z까지는 사용하지 말고 기존 기간을 유지해 주세요.",
+            "최근 하루는 사용하지 말고 기존 기간을 유지해 주세요.",
+        ):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertEqual(anchors["windowStart"], "2026-11-05T12:00:00.000Z")
+                self.assertEqual(anchors["windowEnd"], "2026-11-06T11:00:00.000Z")
+                self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "READY_TO_PLAN")
+
+    def test_excluded_exact_period_allows_only_an_explicit_new_interval(self):
+        data = payload(); data["messages"][-1]["text"] = (
+            "Do not use 2026-11-05T12:00:00Z through 2026-11-06T11:00:00Z.")
+        self.assertIsNone(normalize(data)["explicitScopeAnchors"]["windowStart"])
+        data["messages"][-1]["text"] += " Use 2026-11-02T00:00:00Z to 2026-11-03T00:00:00Z."
+        # A sentence boundary is explicit; a negated interval cannot select it.
+        anchors = normalize(data)["explicitScopeAnchors"]
+        self.assertEqual(anchors["windowStart"], "2026-11-02T00:00:00Z")
+        self.assertEqual(anchors["windowEnd"], "2026-11-03T00:00:00Z")
+        data["messages"][-1]["text"] = (
+            "Use 2026-11-01T00:00:00Z to 2026-11-02T00:00:00Z or "
+            "2026-11-03T00:00:00Z to 2026-11-04T00:00:00Z.")
+        self.assertIsNone(normalize(data)["explicitScopeAnchors"]["windowStart"])
+
+    def test_refiner_structured_schema_locks_only_actual_user_derived_wallet_and_time_anchors(self):
+        data = payload()
+        data["messages"][-1]["text"] = "Use " + OTHER + " from 2026-11-02T01:00:00Z to 2026-11-04T02:00:00Z."
+        normalized = normalize(data); value = refined(data); value["intent"].update(normalized["explicitScopeAnchors"])
+        model = ScriptedModel(value); result = run("refine", data, model)
+        self.assertEqual(result["status"], "READY_TO_PLAN")
+        fields = model.calls[0][2]["properties"]["intent"]["properties"]
+        for field, expected in normalized["explicitScopeAnchors"].items():
+            self.assertEqual(fields[field]["enum"], [expected])
+            if field == "wallet":
+                self.assertEqual(result["intent"][field], expected)
+            else:
+                # Existing DTO normalization emits UTC milliseconds; the
+                # provider schema still binds the exact supplied anchor text.
+                self.assertEqual(datetime.fromisoformat(result["intent"][field].replace("Z", "+00:00")),
+                    datetime.fromisoformat(expected.replace("Z", "+00:00")))
+        self.assertNotEqual(result["intent"]["wallet"], data["intent"]["wallet"])
+        self.assertEqual(fields["purpose"]["type"], ["string", "null"])
+        self.assertNotIn("enum", fields["purpose"])
+
+    def test_unresolved_anchor_schema_only_allows_null_and_missing_fields_remain_exact(self):
+        data = payload(); data["intent"] = None
+        intent = {"purpose": "Review returned transfer counts", "wallet": None, "windowStart": None,
+            "windowEnd": None, "resourceId": RESOURCE, "missingFields": ["wallet", "windowStart", "windowEnd"]}
+        model = ScriptedModel(refined(data, status="CLARIFICATION_REQUIRED", intent=intent))
+        result = run("refine", data, model)
+        self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
+        fields = model.calls[0][2]["properties"]["intent"]["properties"]
+        for field in ("wallet", "windowStart", "windowEnd"):
+            self.assertEqual(fields[field]["enum"], [None]); self.assertIsNone(result["intent"][field])
+        self.assertEqual(result["intent"]["missingFields"], intent["missingFields"])
+
+    def test_known_scope_cannot_be_erased_even_by_a_clarification_response_that_ignores_schema(self):
+        for field in ("wallet", "windowStart", "windowEnd"):
+            with self.subTest(field=field):
+                data = payload(); value = refined(data, status="CLARIFICATION_REQUIRED")
+                value["intent"][field] = None; value["intent"]["missingFields"] = [field]
+                model = ScriptedModel(value); result = run("refine", data, model)
+                self.assertEqual(result, {"status": "STOPPED", "code": "WORKSPACE_STALE_CONTEXT"})
+                self.assertEqual(len(model.calls), 1)
+
+    def test_baseline_complete_scope_clarification_is_rejected_never_promoted_to_ready(self):
+        data = payload(); value = refined(data, status="CLARIFICATION_REQUIRED",
+            assistantText="The wallet and period are present, but please state them again.")
+        model = ScriptedModel(value); result = run("refine", data, model)
+        self.assertEqual(result, {"status": "STOPPED", "code": "WORKSPACE_INVALID_MODEL_OUTPUT"})
+        self.assertEqual(model.replies, []); self.assertEqual(len(model.calls), 1)
+        self.assertEqual(value["status"], "CLARIFICATION_REQUIRED")
+
+    def test_baseline_nonnull_purpose_cannot_be_falsely_listed_as_missing(self):
+        for purpose in ("지난 하루 동안의 반환된 이체 요약", "Summarize returned transfers"):
+            with self.subTest(purpose=purpose):
+                data = payload(); value = refined(data, status="CLARIFICATION_REQUIRED")
+                value["intent"].update(purpose=purpose, missingFields=["purpose"])
+                self.assertEqual(run("refine", data, ScriptedModel(value)), {"status": "STOPPED", "code": "WORKSPACE_INVALID_MODEL_OUTPUT"})
+
+    def test_explicit_latest_scope_can_complete_an_old_null_snapshot_without_post_response_repair(self):
+        data = payload(); data["intent"] = None
+        data["messages"][-1]["text"] = "Summarize returned transfers for " + OTHER + " from 2026-11-03T01:00:00Z to 2026-11-05T02:00:00Z."
+        anchors = normalize(data)["explicitScopeAnchors"]
+        intent = {"purpose": "Summarize returned transfers", **anchors, "resourceId": RESOURCE, "missingFields": []}
+        response = refined(data, intent=intent); model = ScriptedModel(response)
+        result = run("refine", data, model)
+        self.assertEqual(result["status"], "READY_TO_PLAN")
+        for field in anchors:
+            if field == "wallet":
+                self.assertEqual(result["intent"][field], response["intent"][field])
+            else:
+                self.assertEqual(datetime.fromisoformat(result["intent"][field].replace("Z", "+00:00")),
+                    datetime.fromisoformat(response["intent"][field].replace("Z", "+00:00")))
+        self.assertEqual(result["intent"]["missingFields"], [])
+
+    def test_scope_binding_cannot_silently_drop_user_submillisecond_precision(self):
+        data = payload(); data["messages"][-1]["text"] = "Use 2026-11-03T01:00:00.000001Z to 2026-11-05T02:00:00Z."
+        anchors = normalize(data)["explicitScopeAnchors"]
+        value = refined(data); value["intent"].update(anchors)
+        model = ScriptedModel(value); result = run("refine", data, model)
+        self.assertEqual(result, {"status": "STOPPED", "code": "WORKSPACE_STALE_CONTEXT"})
+        field = model.calls[0][2]["properties"]["intent"]["properties"]["windowStart"]
+        self.assertEqual(field["enum"], ["2026-11-03T01:00:00.000001Z"])
+
+    def test_negative_capability_and_approval_boundaries_do_not_bypass_real_critic_rejections(self):
+        for limitation in ("Cannot establish balances, profit, identity or complete history.",
+                           "Human approval is required before execution.", PARTIAL_KO):
+            with self.subTest(limitation=limitation):
+                data = payload(); proposal = planned(data); proposal["limitations"] = [limitation]
+                accepted = run("plan", data, ScriptedModel(proposal, critic(data)))
+                self.assertEqual(accepted["status"], "PROPOSED")
+                rejected = run("plan", data, ScriptedModel(proposal, critic(data, verdict="REJECT", issueCodes=["STALE_INTENT"])))
+                self.assertEqual(rejected, {"status": "STOPPED", "code": "WORKSPACE_PLAN_REJECTED"})
+
+    def test_unsupported_goal_is_not_replaced_by_output_preference_or_status_logic(self):
+        for purpose in ("Calculate investment profit.", "지갑 소유자의 실명을 알려 주세요."):
+            with self.subTest(purpose=purpose):
+                data = payload(); data["messages"][-1]["text"] = purpose
+                value = refined(data, status="UNSUPPORTED"); value["intent"]["purpose"] = purpose
+                result = run("refine", data, ScriptedModel(value))
+                self.assertEqual(result["status"], "UNSUPPORTED")
+                self.assertEqual(result["intent"]["purpose"].splitlines()[0], purpose)
+                self.assertNotIn("Summarize returned transfers", result["intent"]["purpose"])
+                self.assertNotIn("반환된 이체를 요약", result["intent"]["purpose"])
+
     def test_optional_interface_fallback_and_explicit_opposite_user_language_reach_cli_entrypoint(self):
         for fallback, text, expected in (
                 ("ko", "Review returned wallet transfers.", "ko"),
@@ -85,7 +268,7 @@ class WorkspaceRoleTests(unittest.TestCase):
                     main()
                 result = json.loads(output.getvalue())
                 self.assertEqual(result["status"], "READY_TO_PLAN")
-                self.assertEqual(result["promptVersion"], "workspace/v2")
+                self.assertEqual(result["promptVersion"], "workspace/v3")
                 self.assertEqual(model.calls[0][1]["outputContract"]["language"], expected)
                 self.assertEqual(infer_output_options(result["intent"]["purpose"]).language, expected)
 
@@ -144,6 +327,7 @@ class WorkspaceRoleTests(unittest.TestCase):
                 status = "CLARIFICATION_REQUIRED" if incomplete else "READY_TO_PLAN"
                 if incomplete:
                     intent.update(wallet=None, windowStart=None, windowEnd=None, missingFields=["wallet", "windowStart", "windowEnd"])
+                    data["intent"] = copy.deepcopy(intent)
                 result = run("refine", data, ScriptedModel(refined(data, status=status, intent=intent)))
                 self.assertEqual(result["status"], status)
                 self.assertTrue(result["intent"]["purpose"].startswith("반환된 지갑 이체 건수 확인\n"))
@@ -250,7 +434,7 @@ class WorkspaceRoleTests(unittest.TestCase):
         self.assertEqual(result["executionKind"], "live_model_planner_critic")
         self.assertIn(PARTIAL, result["limitations"])
         self.assertEqual(result["modelVersion"], MODEL)
-        self.assertEqual(result["promptVersion"], "workspace/v2")
+        self.assertEqual(result["promptVersion"], "workspace/v3")
         self.assertNotIn("contextDigest", result)
         sent = json.dumps([call[1] for call in model.calls])
         for excluded in ("must-not-send", "amountAtomic", "recipient"):

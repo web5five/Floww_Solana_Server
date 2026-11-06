@@ -27,10 +27,13 @@ do not pause an existing project or upgrade a paid tier to bypass them.
 
 Use `render.yaml` as the creation template after source review and tests. It
 disables automatic deploys, selects `main` and keeps payments off. Select the
-verified commit explicitly for a release. The HTTP probe uses `/api/health`;
-HTTP 200 establishes that the process serves the route. Read `ready`,
-`databaseReady` and `missing` separately for payment configuration and the
-pre-ledger import guard. A probe does not establish model quality or settlement.
+verified commit explicitly for a release. The Render HTTP probe uses `/readyz`;
+HTTP 200 requires bounded DB/ledger readiness and an accepting lifecycle.
+`/livez` checks process liveness. `/api/health` exposes capability information;
+check `workspaceAdapterReady` and `reportAdapterReady` separately for Python
+packaging. Its HTTP200 alone does not establish capability readiness. Read
+payment configuration separately. No probe establishes model quality, funding or
+settlement. See [READINESS.md](../production/READINESS.md).
 
 | Setting | Value or source |
 | --- | --- |

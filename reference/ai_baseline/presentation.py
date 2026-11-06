@@ -124,6 +124,18 @@ def _output_focus(purpose: str) -> str:
 # These exact authored end sentences preserve presentation choices through the
 # existing purpose field. They are prose, never scope/permission declarations.
 _OUTPUT_SENTENCES = {
+    ("ko", "summary"): "출력 조건: 답변은 한국어 요약 형식으로 작성합니다.",
+    ("ko", "incoming"): "출력 조건: 답변은 한국어로 작성하고 입금만 표시하는 형식을 사용합니다.",
+    ("ko", "outgoing"): "출력 조건: 답변은 한국어로 작성하고 출금만 표시하는 형식을 사용합니다.",
+    ("ko", "count"): "출력 조건: 답변은 한국어로 작성하고 건수만 표시하는 형식을 사용합니다.",
+    ("en", "summary"): "Output preference: Answer in English in summary form.",
+    ("en", "incoming"): "Output preference: Answer in English, with an incoming-only display.",
+    ("en", "outgoing"): "Output preference: Answer in English, with an outgoing-only display.",
+    ("en", "count"): "Output preference: Answer in English, with a counts-only display.",
+}
+# Existing stored v2 goals remain readable, but new wording never changes an
+# unsupported goal into a proposed transfer-report task.
+_LEGACY_OUTPUT_SENTENCES = {
     ("ko", "summary"): "출력 조건: 한국어로 반환된 이체를 요약합니다.",
     ("ko", "incoming"): "출력 조건: 한국어로 반환된 입금만 요약합니다.",
     ("ko", "outgoing"): "출력 조건: 한국어로 반환된 출금만 요약합니다.",
@@ -133,16 +145,21 @@ _OUTPUT_SENTENCES = {
     ("en", "outgoing"): "Output: Summarize outgoing transfers only in English.",
     ("en", "count"): "Output: Show only transfer counts in English.",
 }
-_SENTENCE_OPTIONS = {sentence: OutputOptions(*key) for key, sentence in _OUTPUT_SENTENCES.items()}
+_SENTENCE_OPTIONS = {sentence: OutputOptions(*key)
+    for mapping in (_OUTPUT_SENTENCES, _LEGACY_OUTPUT_SENTENCES) for key, sentence in mapping.items()}
 _FULL_SUMMARY = re.compile(
     r"\b(?:summarize|show|include|review)\s+(?:all|both)\s+(?:returned\s+)?(?:transfers|directions)\b|"
     r"\bboth\s+incoming\s+and\s+outgoing\b|"
     r"전체\s*(?:이체|송금|내역)|입금과\s*출금|입출금\s*(?:모두|전체)", re.IGNORECASE)
 
 
-def _canonical_options(text: str) -> OutputOptions | None:
-    return next((options for sentence, options in _SENTENCE_OPTIONS.items()
+def _canonical_sentence(text: str) -> str | None:
+    return next((sentence for sentence in _SENTENCE_OPTIONS
                  if text == sentence or text.endswith(("\n" + sentence, " " + sentence))), None)
+
+
+def _canonical_options(text: str) -> OutputOptions | None:
+    return _SENTENCE_OPTIONS.get(_canonical_sentence(text))
 
 
 def with_output_options(purpose: str, options: OutputOptions, *, max_length: int = 2_000) -> str:
@@ -150,8 +167,8 @@ def with_output_options(purpose: str, options: OutputOptions, *, max_length: int
     if type(purpose) is not str or not isinstance(options, OutputOptions):
         raise TypeError("Purpose and output options are required")
     base = purpose.strip()
-    while prior := _canonical_options(base):
-        base = base[:-len(_OUTPUT_SENTENCES[(prior.language, prior.focus)])].strip()
+    while prior := _canonical_sentence(base):
+        base = base[:-len(prior)].strip()
     if not base:
         raise ValueError("A clear goal is required")
     result = base + "\n" + _OUTPUT_SENTENCES[(options.language, options.focus)]
