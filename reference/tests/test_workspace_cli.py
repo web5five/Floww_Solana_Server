@@ -208,6 +208,47 @@ class WorkspaceRoleTests(unittest.TestCase):
                 data["messages"].append({"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."})
                 self.assertEqual(run("plan", data, ScriptedModel(planned(data), critic(data)))["status"], "PROPOSED")
 
+    def test_named_duration_connectors_require_clarification_without_parsing_the_tail(self):
+        for phrase in ("최근 하루 그리고 한 시간", "최근 하루 그리고 나흘",
+                       "최근 하루 동안, 그리고 한 시간", "최근 사흘간은, 그리고 나흘",
+                       "지난 하루를, 그리고 한 시간", "최근 이틀 및 한 시간",
+                       "최근 사흘 또는 나흘", "최근 하루 아니면 한 시간",
+                       "최근 하루 그리고 입출금 요약"):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
+                # A model echoing a guessed 24/48/72-hour scope cannot make it ready.
+                guessed = refined(data)
+                guessed["intent"].update(windowStart="2026-11-05T12:00:00.000Z",
+                    windowEnd="2026-11-06T12:00:00.000Z")
+                model = ScriptedModel(guessed)
+                self.assertEqual(run("refine", data, model)["status"], "STOPPED")
+                self.assertEqual(len(model.calls), 1)
+                clarification = refined(data, status="CLARIFICATION_REQUIRED",
+                    assistantText="하나의 정확한 관찰 기간을 알려 주세요.")
+                clarification["intent"].update(windowStart=None, windowEnd=None,
+                    missingFields=["windowStart", "windowEnd"])
+                self.assertEqual(run("refine", data, ScriptedModel(clarification))["status"], "CLARIFICATION_REQUIRED")
+                model = ScriptedModel()
+                self.assertEqual(run("plan", data, model)["status"], "STOPPED")
+                self.assertEqual(model.calls, [])
+
+    def test_single_named_period_with_purpose_and_style_keeps_its_scope(self):
+        for phrase in ("최근 하루 동안 입출금 요약을 작성해 주세요.",
+                       "최근 하루 입출금을 정리하고 한국어로 설명해 주세요.",
+                       "최근 하루 관찰 내역을 요약해 주세요. 그리고 한국어로 설명해 주세요."):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertEqual(anchors["windowStart"], "2026-11-05T12:00:00.000Z")
+                response = refined(data); response["intent"].update(anchors)
+                result = run("refine", data, ScriptedModel(response))
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+                data["intent"] = result["intent"]
+                data["messages"].append({"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."})
+                self.assertEqual(run("plan", data, ScriptedModel(planned(data), critic(data)))["status"], "PROPOSED")
+
     def test_korean_named_scope_stays_frozen_for_planning_and_style_only_followup(self):
         for word, days in (("하루", 1), ("이틀", 2), ("사흘", 3), ("일주일", 7)):
             with self.subTest(word=word):

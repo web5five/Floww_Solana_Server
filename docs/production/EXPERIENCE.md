@@ -60,6 +60,13 @@ integer arithmetic. Atomic base units remain in the backend contracts and
 expandable transaction details. Invalid precision, exponential notation and
 values beyond the bounded integer representation are rejected.
 
+Temporal anchoring recognizes a bounded set of explicit rolling-period
+expressions, including 하루/이틀/사흘/일주일. It is not a general natural-language
+date parser. Multiple periods require clarification unless complete expressions
+form a supported explicit replacement. A recognized connector immediately
+continuing a named period stays unresolved even when its tail is not another
+supported time word; ordinary purpose/style text remains supported.
+
 ## Preserved boundaries
 
 - Every new financial execution still requires explicit exact-quote consent.
