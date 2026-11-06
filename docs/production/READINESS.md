@@ -50,6 +50,23 @@ of security certification, accessibility conformance or a contractual SLA.
 
 ## Current iteration evidence
 
+The table's starting checkpoint is historical, not a list of features still
+absent. Released main `2d0d802` includes the reviewed PR11–13 changes:
+
+- P03–P06: dedicated DB/ledger readiness, bounded HTTP shutdown, merchant replay
+  admission and redacted fixed-label diagnostics have implementation and
+  negative-path regression evidence.
+- P01/P08/P11: whole-interface KO/EN, scope correction, denial recovery,
+  versioned scripted journey cases and purpose-led desktop/tablet/phone design
+  are verified within the boundaries below. Voice, full keyboard/zoom coverage,
+  actual-model quality and funded completion remain open.
+- P10: [PR13's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42241427893)
+  passed both required PostgreSQL/runtime/Python checks and an actual non-root,
+  network-isolated image check. It did not deploy a public service.
+
+The detailed acceptance record is [VERIFICATION.md](VERIFICATION.md). Those
+implemented controls do not close public origin, wallet or payment acceptance.
+
 The preceding PR11 passed full local Node289/Python206 checks. Its readiness/drain,
 merchant replay admission, redacted diagnostics and scope-correction fixes have
 independent review. Result-first KO/EN exports preserve exact facts and have
@@ -71,11 +88,31 @@ status. [DESIGN.md](DESIGN.md) records the source-based acceptance criteria and
 [VERIFICATION.md](VERIFICATION.md) distinguishes actual browser readback from
 scripted financial display states.
 
-Remaining product work includes explicit step URLs/browser history, voice
-input, broader administrative audit presentation, actual-model
+The navigation follow-up adds explicit hash addresses and same-document
+Back/Forward for all six pages, owned records and the four conversation stages.
+Fresh authenticated reload restores the exact record through read-only calls.
+Drafts, exact retry identities, current-owner state and keyboard focus have
+dedicated race coverage and native-browser readback. No route authorizes a
+financial operation or creates a replacement request.
+
+Remaining product work includes voice input, broader administrative audit
+presentation, actual-model
 quality acceptance, model-bridge preflight/outage UX, approved public-demo
 acceptance and separately approved wallet/funded Devnet completion. None is
 closed by the above test counts.
+
+The existing model failure/retry UI is already implemented. The next packaging
+gap is a bounded, cached offline import check for the configured Python
+workspace/report adapters, before a known local failure consumes model quota
+or starts a new purchase. That check must not call a model or claim provider
+availability. It must also preserve reconciliation and persistence of original
+payment facts when optional report processing is unavailable.
+
+Browser-history acceptance in the navigation work covers same-document hash
+Back/Forward and a fresh reload. Whole-document BFCache restoration across an
+external logout/owner change still needs a dedicated lifecycle test; neither
+`Cache-Control: no-store` nor the small DOM harness proves that boundary. No
+live BFCache data leak has been demonstrated by the current audit.
 
 ## Improvement loop
 

@@ -84,6 +84,37 @@ supported time word; ordinary purpose/style text remains supported.
 - Browser acceptance, automated ordering/privacy regressions and exact source
   review are recorded separately from actual funded Devnet settlement.
 
+## Navigation acceptance contract
+
+The six workspace pages and an owned conversation/Task need explicit addresses
+and browser Back/Forward support. Conversation request, plan, payment and result
+links reveal the corresponding existing content. Their selection cannot change
+the factual stage or authorize a side effect.
+
+- Use allowlisted same-document hash routes with opaque UUID identifiers only.
+  No request text, wallet, quote, approval, proof or private object belongs in
+  the URL, browser history state or persisted draft storage.
+- Restoring a route is read-only. A reload, Back/Forward or stage link must not
+  create a conversation/Task, call a model, prepare a quote or execute/recover
+  a payment. The server must authenticate and authorize every restored record.
+- Fresh authenticated bootstrap can restore an owned deep link. Once guest
+  status is confirmed, sanitize its private target; login must not silently
+  hydrate a target carried across an unknown owner. Owner/session renewal and
+  route generations must reject stale responses and stale expiry events.
+- Normal page navigation preserves the current user's unsent draft in memory.
+  New context, logout and owner changes must not leak former private content.
+  A pending financial operation remains bound to its original exact selection.
+- Keep the keyboard skip link, meaningful focus and actual progress semantics.
+  A requested result stage without a result remains unavailable, not complete.
+
+[MDN's History API documentation](https://developer.mozilla.org/en-US/docs/Web/API/History/pushState)
+and [popstate event sequence](https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event)
+were checked on November7: explicit history writes do not dispatch traversal
+events, and traversal can also dispatch a hash event. The implementation must
+not apply the same navigation twice. Focus checks follow
+[W3C's focus-order guidance](https://www.w3.org/WAI/WCAG22/Understanding/focus-order.html);
+this is not a claim of full accessibility conformance.
+
 ## Acceptance
 
 The internal browser exercised a newly typed natural-language request through
