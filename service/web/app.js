@@ -2,10 +2,11 @@
   'use strict';
   const $ = id => document.getElementById(id);
   const state = { wallet: null, health: null, tasks: [], activeId: null, initializing: true, busy: false, busyOperation: '', busyToken: null, approvalHash: null, provider: null,
-    nextCursor: null, pendingCreate: null, sessionEpoch: 0, selectionEpoch: 0, pendingSelection: null };
+    nextCursor: null, pendingCreate: null, sessionEpoch: 0, selectionEpoch: 0, pendingSelection: null,
+    selectionTarget: null, routeManaged: false, navigationEpoch: 0 };
   const locale = window.FlowwLocale, authored = locale.copy;
   const put = (node, value) => locale.text(node, value, () => state.sessionEpoch);
-  let announcedWallet;
+  let announcedWallet, announcedGeneration;
   const policyNames = { PENDING: authored('승인 대기'), ALLOW: authored('승인됨'), DENY: authored('승인되지 않음') };
   const paymentNames = { NOT_STARTED: authored('시작 전'), SIGNING: authored('서명 준비 중'), PENDING: authored('확인 중'), UNKNOWN: authored('확인 필요'), CONFIRMED: authored('결제 확인됨'), FAILED: authored('거래 실패') };
   const deliveryNames = { NOT_STARTED: authored('시작 전'), PENDING: authored('전달 확인 중'), COMPLETED: authored('전달 완료'), FAILED: authored('전달 확인 필요') };
@@ -69,7 +70,25 @@
   }
   function assertSelection(selection) {
     if (state.sessionEpoch !== selection.sessionEpoch || state.wallet !== selection.wallet) throw { code: 'AUTHENTICATION_REQUIRED', stale: true };
-    if (state.selectionEpoch !== selection.selectionEpoch || state.activeId !== selection.id) throw { code: 'TASK_CHANGED' };
+    if (state.selectionEpoch !== selection.selectionEpoch || state.activeId !== selection.id) throw { code: 'TASK_CHANGED', stale: true };
+  }
+  function selectionSnapshot(id = state.activeId) { return { id, wallet: state.wallet, sessionEpoch: state.sessionEpoch, selectionEpoch: state.selectionEpoch }; }
+  function assertTarget(selection) {
+    if (state.sessionEpoch !== selection.sessionEpoch || state.wallet !== selection.wallet || state.selectionEpoch !== selection.selectionEpoch || state.selectionTarget !== selection.id) throw { code: 'TASK_CHANGED', stale: true };
+  }
+  function releaseSelectionRead() {
+    if (!['task.load', 'task.refresh'].includes(state.busyOperation)) return;
+    state.busy = false; state.busyOperation = ''; state.busyToken = null;
+  }
+  function routeContext(detail) {
+    const id = detail?.id ?? null;
+    if (id !== null && (typeof id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id))) return;
+    state.routeManaged = true;
+    if (state.selectionTarget === id && (!detail.clear || state.activeId === null)) return;
+    state.selectionEpoch++; state.selectionTarget = id; state.pendingSelection = null;
+    releaseSelectionRead();
+    if (state.activeId !== id || detail.clear) { state.activeId = null; state.approvalHash = null; $('approval-ack').checked = false; }
+    clearNotice(); render();
   }
 
   function notice(code) {
@@ -102,16 +121,19 @@
     } finally { clearTimeout(timer); }
   }
 
-  function clearSession() {
-    state.sessionEpoch++; state.selectionEpoch++; state.pendingSelection = null;
-    state.busy = false; state.busyOperation = ''; state.busyToken = null;
-    state.wallet = null; state.tasks = []; state.activeId = null; state.approvalHash = null; state.nextCursor = null; state.pendingCreate = null;
+  function clearPrivateTasks() {
+    state.tasks = []; state.activeId = null; state.selectionTarget = null; state.approvalHash = null; state.nextCursor = null; state.pendingCreate = null;
     $('request-form').reset(); $('approval-form').reset(); $('include-archived').checked = false;
     $('window-end').value = localDate(Date.now() - 1000); $('window-start').value = localDate(Date.now() - 86_400_000);
     clearNotice();
     for (const id of ['result-content', 'timeline', 'quote-details']) $(id).replaceChildren();
     for (const id of ['task-meta', 'quote-price', 'quote-atomic', 'quote-parties', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) put($(id), () => '');
     put($('execution-title'), () => authored('선택한 요청')); $('transaction-link').removeAttribute('href');
+  }
+  function clearSession() {
+    state.sessionEpoch++; state.selectionEpoch++; state.pendingSelection = null;
+    state.busy = false; state.busyOperation = ''; state.busyToken = null; state.wallet = null;
+    clearPrivateTasks();
     render();
   }
   async function perform(operation, action) {
@@ -179,7 +201,10 @@
       const meta = element('span', null, 'task-item-meta');
       meta.append(element('span', () => dateText(task.createdAt)), element('span', () => task.archivedAt ? authored('보관됨 · ') + taskSummary(task).text : taskSummary(task).text, 'task-item-state'));
       button.append(meta);
-      button.addEventListener('click', () => requestSelection({ id: task.id }));
+      button.addEventListener('click', () => {
+        window.dispatchEvent(new CustomEvent('floww:task-navigation', { detail: { id: task.id } }));
+        return requestSelection({ id: task.id });
+      });
       return button;
     }));
   }
@@ -315,11 +340,13 @@
   }
   function render() {
     renderHealth(); renderHistory(); renderSelection(); updateControls();
-    if (announcedWallet !== state.wallet) { announcedWallet = state.wallet; emitSession(); }
+    if (announcedWallet !== state.wallet || announcedGeneration !== state.sessionEpoch) {
+      announcedWallet = state.wallet; announcedGeneration = state.sessionEpoch; emitSession();
+    }
     window.dispatchEvent(new CustomEvent('floww:selection', { detail: { wallet: state.wallet, task: active(), busy: state.busy } }));
   }
   function emitSession() { window.dispatchEvent(new CustomEvent('floww:session', { detail: {
-    wallet: state.wallet, health: state.health, initializing: state.initializing,
+    wallet: state.wallet, health: state.health, initializing: state.initializing, generation: state.sessionEpoch,
   } })); }
   function acceptTask(task) {
     if (!task || typeof task.id !== 'string') throw { code: 'RESPONSE_UNAVAILABLE' };
@@ -341,13 +368,22 @@
       known.set(task.id, detail && detail.revision === task.revision ? { ...detail, ...task } : task);
     }
     state.tasks = [...known.values()]; state.nextCursor = result.nextCursor ?? null;
-    if (!state.tasks.some(task => task.id === state.activeId)) state.activeId = state.tasks[0]?.id ?? null;
+    if (!state.tasks.some(task => task.id === state.activeId)) {
+      // A directly linked owned Task can be outside this list's pagination or
+      // archive filter. Keep its identity for the fresh guarded detail read;
+      // do not substitute the first summary or revive cached detail content.
+      state.activeId = state.routeManaged ? state.activeId === state.selectionTarget ? state.activeId : null : state.tasks[0]?.id ?? null;
+    }
+    if (!state.routeManaged) state.selectionTarget = state.activeId;
     if (state.activeId) await refreshSelected();
   }
   async function selectedAction(action, body = {}, id = state.activeId) {
     const task = active();
     if (!task || task.id !== id) throw { code: 'TASK_CHANGED' };
-    const updated = await api('/api/tasks/' + encodeURIComponent(id) + '/' + action, 'POST', body);
+    const selection = selectionSnapshot(id); let updated;
+    try { updated = await api('/api/tasks/' + encodeURIComponent(id) + '/' + action, 'POST', body); }
+    catch (error) { assertSelection(selection); throw error; }
+    assertSelection(selection);
     if (updated?.id !== id) throw { code: 'RESPONSE_UNAVAILABLE' };
     if (state.wallet) acceptTask(updated);
     return updated;
@@ -355,18 +391,31 @@
   async function refreshSelected() {
     const id = state.activeId;
     if (!id) return;
-    const updated = await api('/api/tasks/' + encodeURIComponent(id));
+    const selection = selectionSnapshot(id); let updated;
+    try { updated = await api('/api/tasks/' + encodeURIComponent(id)); }
+    catch (error) { assertSelection(selection); throw error; }
+    assertSelection(selection);
     if (updated?.id !== id) throw { code: 'RESPONSE_UNAVAILABLE' };
     if (state.wallet) acceptTask(updated);
   }
   function requestSelection(detail) {
     const id = detail?.id;
     if (!state.wallet || typeof id !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)) return;
-    if (id !== state.activeId) state.selectionEpoch++;
+    if (id !== state.selectionTarget) {
+      state.selectionEpoch++; state.selectionTarget = id; state.activeId = null; state.pendingSelection = null;
+      releaseSelectionRead();
+    }
     const requested = { id, prepareQuote: detail.prepareQuote === true };
-    if (state.busy || state.initializing) { state.pendingSelection = requested; return; }
+    if (state.busy || state.initializing) {
+      if (state.busyOperation !== 'task.load' || requested.prepareQuote) state.pendingSelection = requested;
+      return;
+    }
+    const selection = selectionSnapshot(id);
     return perform('task.load', async () => {
-      const task = await api('/api/tasks/' + encodeURIComponent(id));
+      let task;
+      try { task = await api('/api/tasks/' + encodeURIComponent(id)); }
+      catch (error) { assertTarget(selection); throw error; }
+      assertTarget(selection);
       if (task?.id !== id) throw { code: 'RESPONSE_UNAVAILABLE' };
       if (!state.wallet) return;
       acceptTask(task); state.activeId = id;
@@ -399,6 +448,12 @@
     if (!(bytes instanceof Uint8Array) || bytes.length !== 64) throw { code: 'INVALID_SIGNATURE' };
     const signature = btoa(String.fromCharCode(...bytes));
     const session = await api('/api/auth/verify', 'POST', { wallet, challengeId: challenge.challengeId, signature });
+    if (state.wallet && state.wallet !== session.wallet) {
+      state.sessionEpoch++; state.selectionEpoch++; state.pendingSelection = null;
+      // A verified replacement owner gets a clean private surface, while the
+      // current sign-in keeps its own busy lease through new-owner loading.
+      clearPrivateTasks();
+    }
     state.sessionEpoch++; state.wallet = session.wallet;
     if (!$('report-wallet').value.trim()) $('report-wallet').value = session.wallet;
     if (state.provider !== provider) {
@@ -410,7 +465,7 @@
         notice('AUTHENTICATION_REQUIRED');
       });
     }
-    await loadTasks();
+    render(); await loadTasks();
   }));
   $('logout').addEventListener('click', () => perform('task.signOut', async () => {
     await api('/api/auth/logout', 'POST', {}); clearSession();
@@ -422,6 +477,8 @@
   $('restore-task').addEventListener('click', () => perform('task.restore', async () => { await selectedAction('restore'); await loadTasks(); }));
   window.addEventListener('floww:session-refresh', emitSession);
   window.addEventListener('floww:session-expired', event => { if (state.wallet && event.detail?.wallet === state.wallet) clearSession(); });
+  window.addEventListener('floww:route-context', event => routeContext(event.detail));
+  window.addEventListener('floww:route-change', () => { state.navigationEpoch++; });
   window.addEventListener('floww:select-task', event => requestSelection(event.detail));
   $('refresh-task').addEventListener('click', () => perform('task.refresh', refreshSelected));
   $('quote-task').addEventListener('click', () => perform('task.quote', () => selectedAction('quote')));
@@ -490,9 +547,14 @@
       const body = { purpose: $('purpose').value.trim(), wallet: $('report-wallet').value.trim(), windowStart: start.toISOString(), windowEnd: end.toISOString() };
       const serialized = JSON.stringify(body);
       if (state.pendingCreate?.serialized !== serialized) state.pendingCreate = { serialized, key: crypto.randomUUID() };
+      const selection = selectionSnapshot(), navigationEpoch = state.navigationEpoch;
       const task = await api('/api/tasks', 'POST', body, { 'Idempotency-Key': state.pendingCreate.key });
       state.pendingCreate = null;
-      acceptTask(task); state.activeId = task.id;
+      acceptTask(task);
+      if (selection.selectionEpoch === state.selectionEpoch && navigationEpoch === state.navigationEpoch) {
+        state.activeId = task.id; state.selectionTarget = task.id;
+        window.dispatchEvent(new CustomEvent('floww:task-navigation', { detail: { id: task.id, created: true } }));
+      }
     });
   });
   $('download-report').addEventListener('click', () => {
@@ -525,9 +587,10 @@
     try {
       const session = await api('/api/session');
       state.sessionEpoch++; state.wallet = session.wallet;
+      emitSession();
       if (!$('report-wallet').value.trim()) $('report-wallet').value = session.wallet;
       await loadTasks();
-    } catch (error) { if (error.status !== 401) notice(error.code); }
+    } catch (error) { if (!error.stale && error.status !== 401) notice(error.code); }
     state.initializing = false;
     render(); emitSession(); flushSelection();
   })();

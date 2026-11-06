@@ -22,7 +22,7 @@ async function until(check) {
 // Execute the unmodified browser clients with inert DOM primitives. These tests
 // exercise request ordering, public events and visible text; they do not assert
 // implementation source strings, claim layout coverage, or contact a network.
-function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageDenied = false } = {}) {
+function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageDenied = false, hash = '' } = {}) {
   const nodes = [], ids = new Map(), intervals = new Map(), windowEvents = new Map(), events = [], backgroundErrors = [], downloads = [], blobs = new Map(); let timerId = 0;
   class Node {
     constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {};
@@ -124,6 +124,26 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
   class Event { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } }
   const window = { scrollTo() {}, addEventListener(type, fn) { const values = windowEvents.get(type) ?? []; values.push(fn); windowEvents.set(type, values); },
     dispatchEvent(event) { events.push(event); for (const fn of windowEvents.get(event.type) ?? []) fn(event); return true; } };
+  const historyEntries = [{ url: new URL('https://floww.example/' + hash).href, state: null }], historyWrites = []; let historyIndex = 0;
+  const currentURL = () => new URL(historyEntries[historyIndex].url);
+  window.location = { get href() { return currentURL().href; }, get origin() { return currentURL().origin; },
+    get pathname() { return currentURL().pathname; }, get search() { return currentURL().search; }, get hash() { return currentURL().hash; },
+    set hash(value) { const next = currentURL(); next.hash = value; if (next.href === currentURL().href) return;
+      historyEntries.splice(historyIndex + 1); historyEntries.push({ url: next.href, state: null }); historyIndex++;
+      window.dispatchEvent(new Event('hashchange')); } };
+  function writeHistory(kind, value, url) {
+    const target = new URL(url, currentURL()); if (target.origin !== currentURL().origin) throw new Error('Cross-origin history URL');
+    const entry = { url: target.href, state: value };
+    historyWrites.push({ kind, ...entry });
+    if (kind === 'replace') historyEntries[historyIndex] = entry;
+    else { historyEntries.splice(historyIndex + 1); historyEntries.push(entry); historyIndex++; }
+  }
+  window.history = { get state() { return historyEntries[historyIndex].state; }, get length() { return historyEntries.length; },
+    pushState(value, _, url) { writeHistory('push', value, url); }, replaceState(value, _, url) { writeHistory('replace', value, url); },
+    go(delta) { const next = historyIndex + delta; if (next < 0 || next >= historyEntries.length || next === historyIndex) return;
+      const oldHash = currentURL().hash; historyIndex = next; window.dispatchEvent(new Event('popstate'));
+      if (oldHash !== currentURL().hash) window.dispatchEvent(new Event('hashchange')); },
+    back() { this.go(-1); }, forward() { this.go(1); } };
   const storage = new Map(savedLocale === undefined ? [] : [['floww.ui.locale', savedLocale]]), storageWrites = [];
   window.navigator = { languages, language: languages[0] };
   window.localStorage = {
@@ -142,7 +162,7 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
     TextEncoder, Uint8Array, Blob, btoa, queueMicrotask, crypto: globalThis.crypto };
   vm.runInNewContext(units + '\n' + locale + '\n' + source, context, { filename: 'browser-client-under-test.js' });
   return { document, window, nodes, calls, intervals, events, backgroundErrors, get: id => ids.get(id),
-    storage, storageWrites, downloads,
+    storage, storageWrites, downloads, historyEntries, historyWrites,
     emit(type, detail) { window.dispatchEvent(new Event(type, { detail })); },
     session(wallet, health = { ready: false }) { window.dispatchEvent(new Event('floww:session', { detail: { wallet, health } })); },
     nav(name) { return nodes.find(node => node.dataset.view === name).trigger('click'); } };

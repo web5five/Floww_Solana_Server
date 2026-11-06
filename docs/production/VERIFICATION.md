@@ -193,6 +193,53 @@ Source review, screenshot measurements and sanitized checks are retained in the
 local GWDC evidence directory. Required PostgreSQL and deployment-image checks
 remain CI gates for the exact PR head; these host checks do not replace them.
 
+## Route restoration and current-context safety — 2026-11-07
+
+- Full local Node suite: **361 passed, zero failed/skipped**, with required
+  isolated PostgreSQL checks enabled. Python: **209 passed**. The 117 UI cases
+  include 33 new navigation, replay, session and focus regressions. Source/NFC
+  checks cover 70 files; workflow lint and Git whitespace checks pass.
+- Six allowlisted page routes, UUID Task/conversation targets and four actual
+  conversation-stage links support authenticated bootstrap, same-document
+  Back/Forward and fresh reload. Traversal and paired browser events perform
+  read-only hydration, without new model, quote, approval or execution calls.
+- In the internal browser, the old page lost its selected conversation after
+  reload. The new page restored its exact conversation and single linked Task.
+  All six page routes and all four stage targets were inspected. Viewing an
+  earlier stage preserved the factual completion status and current-step label.
+- A direct result route for an UNKNOWN Task retained UNKNOWN, exposed no answer
+  and showed a pending-stage explanation. A new draft's text, explicitly edited
+  wallet/window and memory choice survived opening another conversation and
+  returning with Back. The local navigation fixture recorded no non-GET calls.
+- The narrow scope helpers preserve original millisecond facts unless edited.
+  An uncertain explicit message retry reuses its original exact body and
+  idempotency identifier after route restoration/fresh scope reads. A completed
+  creation cannot redirect a newer route. Inert transports verify these races;
+  they do not evaluate a live model or payment provider.
+- Client owner/session generations and route/selection leases reject old
+  responses, including old 401s, before they can affect the new context. Core
+  handler tests cover same-wallet renewal and clearing a replacement owner's
+  hidden private DOM. Their wallet/signature/HTTP ports are inert; this is not
+  Phantom-extension acceptance.
+- Native KO/EN desktop and 390px checks show full-width stage links, two phone
+  columns and targets at least 44px tall. Stage focus no longer hides the exact
+  price under the sticky header: the phone target starts at 96px below a 72px
+  header; the desktop target starts at 104px below an 80px header. The focused
+  stage anchor remained focused through a timed UNKNOWN-poll observation; a
+  real core-poll regression separately checks unchanged anchor identity.
+- The keyboard skip link preserves the current deep address. Actual local
+  managed-PostgreSQL guest bootstrap sanitized the private target, hid the
+  conversation/Task and displayed the login gate. No model or financial action
+  was requested during native acceptance. The viewport was reset and an empty
+  real local preview retained.
+
+Authenticated financial states in the browser use an explicitly scripted,
+loopback-only display service serving the unmodified web assets. They are not
+funded settlement/delivery evidence. Screenshots, observed routes and release
+binding remain in the local GWDC evidence directory. Whole-document BFCache
+restoration is a separate unverified lifecycle boundary, as tracked in
+[READINESS.md](READINESS.md).
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

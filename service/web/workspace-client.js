@@ -4,7 +4,13 @@
   const state = { wallet: null, epoch: 0, view: 'assistant', busy: false, health: null,
     conversations: [], conversationCursor: null, conversation: null, memories: [], memoryCursor: null,
     mandates: [], dashboard: null, catalog: [], activities: [], tasks: [], pendingMessage: null, pendingPlan: null, stage: null, taskBusy: false, selectedTask: null, guestPending: null, authReady: false,
-    scopeBaseline: { wallet: '', start: '', end: '' }, presentedConversation: null, presentedMessage: null };
+    scopeBaseline: { wallet: '', start: '', end: '' }, presentedConversation: null, presentedMessage: null,
+    route: null, routeVersion: 0, routeLoading: false, runToken: null, sessionGeneration: null, pendingFocus: null, draftBinding: 'new', journeyLinksSignature: null };
+  // Drafts are ephemeral and bound to this authenticated owner. URLs and browser
+  // history contain only allowlisted view names and opaque record IDs.
+  const drafts = new Map();
+  const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i;
+  const steps = ['request', 'plan', 'payment', 'result'];
   const locale = window.FlowwLocale, authored = locale.copy;
   const put = (node, value) => locale.text(node, value, () => state.epoch);
   const option = (label, value) => { const node = new Option('', value); put(node, label); return node; };
@@ -68,13 +74,13 @@
   function status(text = '', isError = false) { put($('shell-status'), () => text); $('shell-status').className = 'shell-status' + (isError ? ' is-error' : ''); }
   function errorMessage(error) { return errors[error?.code] ?? authored('요청을 완료하지 못했습니다. 입력한 조건과 현재 상태를 다시 확인해 주세요.'); }
   async function api(path, method = 'GET', body) {
-    const epoch = state.epoch, controller = new AbortController(), timer = setTimeout(() => controller.abort(), 40_000);
+    const epoch = state.epoch, routeVersion = state.routeVersion, controller = new AbortController(), timer = setTimeout(() => controller.abort(), 40_000);
     try {
       const response = await fetch(path, { method, credentials: 'same-origin', redirect: 'error', signal: controller.signal,
         headers: { accept: 'application/json', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
         body: body === undefined ? undefined : JSON.stringify(body) });
       const text = response.status === 204 ? '' : await response.text();
-      if (state.epoch !== epoch) throw { code: 'AUTHENTICATION_REQUIRED', status: 401 };
+      if (state.epoch !== epoch || state.routeVersion !== routeVersion) throw { code: 'WORKSPACE_CHANGED', stale: true };
       if (text.length > 400_000) throw { code: 'RESPONSE_UNAVAILABLE' };
       let value; try { value = text ? JSON.parse(text) : null; } catch { throw { code: 'RESPONSE_UNAVAILABLE' }; }
       if (!response.ok) {
@@ -88,15 +94,16 @@
   async function run(operation, action, { refreshConversation = false } = {}) {
     if (state.busy) return;
     if (!state.wallet) { status(errors.AUTHENTICATION_REQUIRED, true); $('connect-wallet').focus(); return; }
-    const epoch = state.epoch; state.busy = true; status(() => authored(operation) + '…'); controls(); renderJourney();
-    try { await action(); if (epoch === state.epoch) status(''); }
+    const epoch = state.epoch, token = {}; state.runToken = token; state.busy = true; status(() => authored(operation) + '…'); controls(); renderJourney();
+    try { await action(); if (epoch === state.epoch && state.runToken === token) status(''); }
     catch (error) {
-      if (epoch !== state.epoch) return;
+      if (error.stale || epoch !== state.epoch || state.runToken !== token) return;
       if (refreshConversation && state.conversation) {
-        try { state.conversation = await api('/api/conversations/' + encodeURIComponent(state.conversation.id)); syncScope(); await loadConversations(); } catch { /* preserve last known view */ }
+        const draft = snapshotDraft();
+        try { state.conversation = await api('/api/conversations/' + encodeURIComponent(state.conversation.id)); syncScope(); applyDraft(draft); await loadConversations(); } catch { /* preserve last known view */ }
       }
-      status(errorMessage(error), true);
-    } finally { if (epoch === state.epoch) { state.busy = false; state.stage = null; renderConversation(); controls(); } }
+      if (epoch === state.epoch && state.runToken === token) status(errorMessage(error), true);
+    } finally { if (epoch === state.epoch && state.runToken === token) { state.busy = false; state.runToken = null; state.stage = null; renderConversation(); controls(); } }
   }
   function metric(label, value, note) { const node = el('article', null, 'metric-card'); node.append(el('span', () => label), el('strong', () => value), el('p', () => note)); return node; }
   function denialGuidance(task) {
@@ -160,7 +167,7 @@
     else $('conversation-list').replaceChildren(...state.conversations.map(item => {
       const b = el('button', null, 'conversation-item'); b.type = 'button'; b.setAttribute('aria-current', String(item.id === state.conversation?.id));
       b.append(el('strong', () => item.data.title), el('small', () => when(item.updatedAt) + ' · ' + (statuses[item.data.status] ?? authored('상태 확인'))));
-      b.addEventListener('click', () => run('workspace.loadConversation', async () => { state.conversation = await api('/api/conversations/' + encodeURIComponent(item.id)); syncScope(); state.pendingMessage = null; state.pendingPlan = null; requestLinkedTask(); renderConversationList(); }));
+      b.addEventListener('click', () => openRoute({ view: 'assistant', id: item.id }, { force: true }));
       return b;
     }));
     $('more-conversations').hidden = !state.conversationCursor;
@@ -184,7 +191,7 @@
     return Boolean(c && (c.messages?.length || c.plan || c.linkedTaskId || c.planLocked || c.working));
   }
   function controls() {
-    const doing = state.busy || state.taskBusy, locked = !state.wallet || doing;
+    const doing = state.busy || state.taskBusy || state.routeLoading, locked = !state.wallet || doing;
     const taskControl = node => { for (let p = node; p; p = p.parentNode) if (p.id === 'task-execution-column') return true; return false; };
     // The mounted task keeps its own exact-quote/health/expiry controls.
     for (const input of document.querySelectorAll('[data-page]:not([data-page=tasks]) input,[data-page]:not([data-page=tasks]) textarea,[data-page]:not([data-page=tasks]) select')) if (!taskControl(input)) input.disabled = locked;
@@ -280,9 +287,25 @@
     put($('journey-current-step'), () => String(stage + 1).padStart(2, '0'));
     $('journey-card').dataset.tone = task?.payment === 'UNKNOWN' || task?.policy === 'DENY' || c?.errorCode ? 'attention' : task?.result?.answer || task?.resultAvailable ? 'complete' : 'neutral';
     $('journey-card').dataset.answerReady = String(Boolean(task?.result?.answer));
-    $('journey-steps').replaceChildren(...[authored('요청 이해'), authored('계획 검토'), authored('결제 조건·실행'), authored('결과와 근거')].map((text, i) => {
-      const item = el('li', () => text); if (i === stage) item.setAttribute('aria-current', 'step'); return item;
-    }));
+    const available = [true, c?.plan, task, task?.result?.answer].map(value => Boolean(c && value));
+    const signature = JSON.stringify([state.epoch, c?.id ?? null, available, stage]);
+    if (signature !== state.journeyLinksSignature) {
+      state.journeyLinksSignature = signature;
+      // A read-only poll must not detach the keyboard's focused anchor. The
+      // existing locale bindings update these same leaves without rebuilding.
+      $('journey-steps').replaceChildren(...[authored('요청 이해'), authored('계획 검토'), authored('결제 조건·실행'), authored('결과와 근거')].map((text, i) => {
+        const item = el('li'), link = el(available[i] ? 'a' : 'span', () => text);
+        if (available[i]) {
+          link.href = routeHash({ view: 'assistant', id: c.id, step: steps[i] });
+          link.addEventListener('click', event => {
+            if (event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault(); openRoute({ view: 'assistant', id: c.id, step: steps[i] });
+          });
+        } else link.setAttribute('aria-disabled', 'true');
+        if (i === stage) link.setAttribute('aria-current', 'step');
+        item.append(link); return item;
+      }));
+    }
     renderGuidedTask();
   }
   function renderConversation() {
@@ -329,9 +352,14 @@
     $('plan-mandate').replaceChildren(option(() => authored('이번 작업의 조건을 별도 승인'), ''), ...choices.map(m => option(() => m.purpose + authored(' · 남은 ') + token(m.remainingAtomic) + authored(' 토큰'), m.id)));
     $('plan-mandate').value = selected; controls(); renderJourney();
   }
-  async function createConversation() {
+  async function createConversation({ carryDraft = false } = {}) {
+    saveDraft(); const draft = carryDraft ? snapshotDraft() : null;
     const c = await api('/api/conversations', 'POST', { useMemory: $('conversation-memory').checked });
+    if (!c || !UUID.test(c.id)) throw { code: 'RESPONSE_UNAVAILABLE' };
     state.conversation = c; state.pendingMessage = null; state.pendingPlan = null; syncScope();
+    state.draftBinding = c.id;
+    $('message-text').value = ''; if (draft) applyDraft(draft);
+    commitRoute({ view: 'assistant', id: c.id, step: 'request' });
     await loadConversations(); renderConversation(); $('message-text').focus();
   }
   function explicitScope() {
@@ -388,26 +416,175 @@
   async function loadBudgets() { const [result, dashboard] = await Promise.all([api('/api/mandates'), api('/api/dashboard')]); state.mandates = result.mandates; state.dashboard = dashboard; renderBudget(); renderConversation(); }
   async function loadActivity() { const result = await api('/api/activity?limit=50'); state.activities = result.events; renderActivity(); }
   function renderActivity() { if (!state.activities.length) empty($('activity-list'), () => state.wallet ? authored('대화와 기억을 저장하면 활동 기록이 나타납니다.') : authored('지갑 로그인 후 내 활동 기록을 확인할 수 있습니다.')); else $('activity-list').replaceChildren(...activityRows(state.activities)); }
-  async function navigate(name) {
-    if (!views[name]) return;
+  function routeHash(route) {
+    if (route.view === 'assistant' && route.id) return '#/assistant/conversations/' + route.id.toLowerCase() + (route.step ? '/' + route.step : '');
+    return '#/' + route.view + (route.view === 'tasks' && route.id ? '/' + route.id.toLowerCase() : '');
+  }
+  function parseRoute(hash) {
+    if (hash === '' || hash === '#') return { view: 'assistant' };
+    const base = /^#\/(overview|assistant|tasks|memory|budgets|activity)\/?$/.exec(hash);
+    if (base) return { view: base[1] };
+    const task = /^#\/tasks\/([a-f0-9-]+)\/?$/i.exec(hash);
+    if (task && UUID.test(task[1])) return { view: 'tasks', id: task[1].toLowerCase() };
+    const conversation = /^#\/assistant\/conversations\/([a-f0-9-]+)(?:\/(request|plan|payment|result))?\/?$/i.exec(hash);
+    if (conversation && UUID.test(conversation[1])) return { view: 'assistant', id: conversation[1].toLowerCase(), ...(conversation[2] ? { step: conversation[2].toLowerCase() } : {}) };
+    return null;
+  }
+  function writeRoute(route, mode = 'push') {
+    const hash = routeHash(route), url = window.location.pathname + hash;
+    // The browser may persist history.state to disk. It must never contain a
+    // wallet, draft, model output, quote, proof or authentication material.
+    if (mode === 'replace' || window.location.hash === hash) window.history.replaceState(null, '', url);
+    else window.history.pushState(null, '', url);
+  }
+  function snapshotDraft() {
+    return { text: $('message-text').value, scope: rawScope(), baseline: { ...state.scopeBaseline },
+      memory: $('conversation-memory').checked, mandate: $('plan-mandate').value,
+      pendingMessage: state.pendingMessage, pendingPlan: state.pendingPlan, uncertain: Boolean(state.busy || state.pendingMessage || state.pendingPlan) };
+  }
+  function messageFingerprint(text, raw, id) { return JSON.stringify({ text: text.trim(), raw, id }); }
+  function saveDraft() {
+    // A pending or denied deep target has no bound editor. Its empty loading
+    // surface must not overwrite the separate, previously authored new draft.
+    if (state.wallet && state.draftBinding !== null) drafts.set(state.draftBinding, snapshotDraft());
+  }
+  function applyDraft(draft) {
+    if (!draft) return;
+    $('message-text').value = draft.text; $('conversation-memory').checked = draft.memory; $('plan-mandate').value = draft.mandate;
+    // An untouched seconds-only display is not an edit of a server timestamp
+    // with milliseconds. Restore only explicit field edits over fresh facts.
+    for (const [id, key] of [['intent-wallet', 'wallet'], ['intent-start', 'start'], ['intent-end', 'end']]) {
+      if (draft.scope[key] !== draft.baseline[key]) $(id).value = draft.scope[key];
+    }
+    state.pendingMessage = draft.pendingMessage; state.pendingPlan = draft.pendingPlan;
+    if (state.pendingMessage?.fingerprint === messageFingerprint(draft.text, draft.scope, state.conversation?.id)) {
+      // A fresh read may have incorporated the submitted scope into its new
+      // baseline. An unchanged retained draft still replays the original exact
+      // request body and idempotency ID, rather than becoming a second turn.
+      state.pendingMessage = { ...state.pendingMessage, fingerprint: messageFingerprint(draft.text, rawScope(), state.conversation?.id) };
+    }
+    if (draft.uncertain) status(authored('navigation.pending'));
+  }
+  function showView(name) {
+    if (!Object.hasOwn(views, name)) return;
     const changed = state.view !== name; state.view = name;
     if (changed) { window.scrollTo({top:0,behavior:'instant'}); $('workspace-top').focus({preventScroll:true}); }
     document.querySelectorAll('[data-page]').forEach(n => { n.hidden = n.dataset.page !== name; });
     document.querySelectorAll('.shell-nav [data-view]').forEach(n => { if (n.dataset.view === name) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current'); });
     ['view-eyebrow', 'view-title', 'view-description'].forEach((id, i) => put($(id), views[name][i]));
     $('quick-new').hidden = name === 'assistant';
-    if (state.wallet) {
-      try {
-        if (name === 'overview') await loadOverview();
-        if (name === 'assistant') { const [list, mandates] = await Promise.all([loadConversations(), api('/api/mandates')]); state.mandates = mandates.mandates; renderConversation(); requestLinkedTask(); }
-        if (name === 'memory') await loadMemory();
-        if (name === 'budgets') await loadBudgets();
-        if (name === 'activity') await loadActivity();
-      } catch (error) { status(errorMessage(error), true); }
-    }
     renderGuidedTask(); controls();
   }
-  function selectTask(id) { navigate('tasks'); window.dispatchEvent(new CustomEvent('floww:select-task', { detail: { id } })); }
+  function focusNode(node) { if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1'); node.focus({ preventScroll: true }); node.scrollIntoView({ block: 'start', behavior: 'instant' }); }
+  function focusRoute() {
+    const pending = state.pendingFocus, route = state.route;
+    if (!pending || pending.hash !== routeHash(route) || pending.version !== state.routeVersion || state.routeLoading) return;
+    if (route.view === 'tasks' && route.id) {
+      if (state.selectedTask?.id !== route.id || state.taskBusy) return;
+      state.pendingFocus = null; focusNode($('execution-title')); return;
+    }
+    if (route.view !== 'assistant' || !route.id || state.conversation?.id !== route.id) return;
+    const c = state.conversation, task = state.selectedTask?.id === c.linkedTaskId ? state.selectedTask : null;
+    if (['payment', 'result'].includes(route.step) && c.linkedTaskId && (!task || state.taskBusy)) return;
+    state.pendingFocus = null;
+    if (route.step === 'request') {
+      if (c.messages?.length) { $('conversation-transcript').open = true; focusNode($('dialogue-messages')); }
+      else $('message-text').focus();
+    } else if (route.step === 'plan' && c.plan) { $('assistant-inspector').open = true; focusNode($('plan-content')); }
+    else if (route.step === 'payment' && task) focusNode(task.quote ? $('quote-summary') : $('execution-title'));
+    else if (route.step === 'result' && task?.result?.answer) focusNode($('result-content'));
+    else {
+      if (route.step) status(authored('navigation.stepPending'));
+      focusNode($('journey-title'));
+    }
+  }
+  function bindTaskContext(id, { clear = false } = {}) {
+    window.dispatchEvent(new CustomEvent('floww:route-context', { detail: { id: id ?? null, clear } }));
+  }
+  function commitRoute(route, mode = 'push') {
+    // A record just created by the user's existing action is already bound to
+    // that action. Updating its URL must not replay it or invalidate itself.
+    if (!state.route || routeHash(state.route) !== routeHash(route)) window.dispatchEvent(new CustomEvent('floww:route-change'));
+    state.route = route; writeRoute(route, mode); showView(route.view);
+  }
+  async function hydrateRoute({ taskRead = true } = {}) {
+    const route = state.route, epoch = state.epoch, version = state.routeVersion;
+    if (!state.authReady) return;
+    if (!state.wallet) {
+      if (route.id) { state.route = { view: route.view }; state.draftBinding = 'new'; state.pendingFocus = null; writeRoute(state.route, 'replace'); status(authored('navigation.signIn')); }
+      controls(); return;
+    }
+    state.routeLoading = route.view === 'assistant' && Boolean(route.id); controls();
+    try {
+      if (route.view === 'overview') await loadOverview();
+      if (route.view === 'assistant') {
+        if (route.id) {
+          const c = await api('/api/conversations/' + encodeURIComponent(route.id));
+          if (c?.id !== route.id) throw { code: 'RESPONSE_UNAVAILABLE' };
+          state.conversation = c; state.draftBinding = c.id; state.pendingMessage = null; state.pendingPlan = null; syncScope(); applyDraft(drafts.get(c.id));
+        }
+        const [, mandates] = await Promise.all([loadConversations(), api('/api/mandates')]);
+        state.mandates = mandates.mandates; renderConversation();
+        if (state.conversation?.linkedTaskId) { bindTaskContext(state.conversation.linkedTaskId); requestLinkedTask(false); }
+      }
+      if (route.view === 'tasks' && route.id && taskRead) window.dispatchEvent(new CustomEvent('floww:select-task', { detail: { id: route.id, prepareQuote: false } }));
+      if (route.view === 'memory') await loadMemory();
+      if (route.view === 'budgets') await loadBudgets();
+      if (route.view === 'activity') await loadActivity();
+    } catch (error) {
+      if (!error.stale && epoch === state.epoch && version === state.routeVersion) {
+        status(error.status === 404 || error.status === 403 ? authored('navigation.unavailable') : errorMessage(error), true);
+        state.pendingFocus = null;
+      }
+    } finally {
+      if (epoch === state.epoch && version === state.routeVersion) { state.routeLoading = false; renderConversation(); renderGuidedTask(); controls(); focusRoute(); }
+    }
+  }
+  async function openRoute(route, { history = 'push', force = false, taskRead = true } = {}) {
+    const canonical = parseRoute(routeHash(route)); if (!canonical) return;
+    const same = state.route && routeHash(state.route) === routeHash(canonical);
+    if (same && !force) { if (history !== 'none') writeRoute(canonical, 'replace'); state.pendingFocus = { hash: routeHash(canonical), version: state.routeVersion }; focusRoute(); return; }
+    const stepOnly = !force && state.route?.view === 'assistant' && canonical.view === 'assistant' && canonical.id && canonical.id === state.route.id && state.conversation?.id === canonical.id;
+    if (!stepOnly) {
+      saveDraft(); state.routeVersion++; state.runToken = null; state.busy = false; state.stage = null; state.routeLoading = false;
+    }
+    state.route = canonical;
+    if (!same) window.dispatchEvent(new CustomEvent('floww:route-change'));
+    if (history !== 'none') writeRoute(canonical, history);
+    state.pendingFocus = { hash: routeHash(canonical), version: state.routeVersion };
+    const differentConversation = canonical.view === 'assistant' && ((canonical.id ?? null) !== (state.conversation?.id ?? null) || (!canonical.id && state.draftBinding !== 'new'));
+    if (differentConversation) {
+      state.conversation = null; state.pendingMessage = null; state.pendingPlan = null; state.selectedTask = null;
+      state.draftBinding = canonical.id ? null : 'new';
+      if (state.wallet) { $('message-text').value = ''; syncScope(); if (!canonical.id) applyDraft(drafts.get('new')); }
+      bindTaskContext(null, { clear: true }); renderConversation();
+    } else if (canonical.view === 'tasks' && canonical.id) bindTaskContext(canonical.id);
+    showView(canonical.view);
+    if (stepOnly) { focusRoute(); return; }
+    await hydrateRoute({ taskRead });
+  }
+  function navigate(name) {
+    if (!Object.hasOwn(views, name)) return;
+    return openRoute({ view: name, ...(name === 'assistant' && state.conversation ? { id: state.conversation.id } : {}),
+      ...(name === 'tasks' && state.selectedTask ? { id: state.selectedTask.id } : {}) });
+  }
+  function selectTask(id) { if (typeof id === 'string' && UUID.test(id)) return openRoute({ view: 'tasks', id }); }
+  function historyRoute() {
+    if (window.location.hash === '#workspace-top') { writeRoute(state.route ?? { view: 'assistant' }, 'replace'); focusNode($('workspace-top')); return; }
+    const route = parseRoute(window.location.hash);
+    const canonical = route ?? { view: 'assistant' };
+    const history = window.location.hash === routeHash(canonical) ? 'none' : 'replace';
+    if (!route) status(authored('navigation.invalid'));
+    return openRoute(canonical, { history });
+  }
+  window.addEventListener('popstate', historyRoute);
+  window.addEventListener('hashchange', historyRoute);
+  document.querySelector('.skip-link').addEventListener('click', event => { event.preventDefault(); focusNode($('workspace-top')); });
+  window.addEventListener('floww:task-navigation', event => {
+    if (!state.wallet || !UUID.test(event.detail?.id ?? '')) return;
+    if (event.detail.created) { commitRoute({ view: 'tasks', id: event.detail.id }); return; }
+    openRoute({ view: 'tasks', id: event.detail.id }, { taskRead: false });
+  });
   document.querySelectorAll('.shell-nav button[data-view]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.view)));
   document.querySelectorAll('[data-go]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.go)));
   $('quick-new').addEventListener('click', async () => { await navigate('assistant'); await run('workspace.createConversation', createConversation); });
@@ -428,7 +605,8 @@
     const c = state.conversation, key = c.id + ':' + c.intentRevision;
     state.stage = 'planning'; status(authored('필요한 자료와 계획을 검토 중…')); renderJourney();
     if (state.pendingPlan?.key !== key) state.pendingPlan = { key, clientRequestId: crypto.randomUUID(), expectedRevision: c.revision };
-    try { state.conversation = await api('/api/conversations/' + c.id + '/plan', 'POST', { clientRequestId: state.pendingPlan.clientRequestId, expectedRevision: state.pendingPlan.expectedRevision }); state.pendingPlan = null; }
+    try { state.conversation = await api('/api/conversations/' + c.id + '/plan', 'POST', { clientRequestId: state.pendingPlan.clientRequestId, expectedRevision: state.pendingPlan.expectedRevision }); state.pendingPlan = null;
+      if (state.view === 'assistant') commitRoute({ view: 'assistant', id: c.id, step: 'plan' }); }
     catch (error) { if (error.status) state.pendingPlan = null; throw error; }
   }
   $('message-form').addEventListener('submit', event => {
@@ -440,13 +618,14 @@
     }
     run('workspace.refine', async () => {
       const text = $('message-text').value.trim(), scope = explicitScope();
-      if (!state.conversation) await createConversation();
+      if (!state.conversation) await createConversation({ carryDraft: true });
       state.stage = 'refining'; renderJourney();
-      const c = state.conversation, key = JSON.stringify({ text, scope, id: c.id });
-      if (state.pendingMessage?.key !== key) state.pendingMessage = { key, clientRequestId: crypto.randomUUID(), expectedRevision: c.revision };
-      const body = { text, scope, clientRequestId: state.pendingMessage.clientRequestId, expectedRevision: state.pendingMessage.expectedRevision };
+      const c = state.conversation, fingerprint = messageFingerprint(text, rawScope(), c.id);
+      if (state.pendingMessage?.fingerprint !== fingerprint) state.pendingMessage = { fingerprint, body: {
+        text, scope, clientRequestId: crypto.randomUUID(), expectedRevision: c.revision } };
+      const pending = state.pendingMessage, body = pending.body;
       try { state.conversation = await api('/api/conversations/' + c.id + '/messages', 'POST', body); state.pendingMessage = null; }
-      catch (error) { if (error.status) state.pendingMessage = null; throw error; }
+      catch (error) { if (error.status && state.pendingMessage === pending) state.pendingMessage = null; throw error; }
       $('message-text').value = ''; syncScope(); renderConversation();
       if (state.conversation.status === 'READY_TO_PLAN' && !state.conversation.plan && !state.conversation.working) await planCurrent();
       await loadConversations();
@@ -462,6 +641,7 @@
       const task = await api('/api/conversations/' + c.id + '/confirm', 'POST', { expectedRevision: c.revision, planHash: c.plan.hash,
         wallet: scope.wallet, windowStart: scope.windowStart, windowEnd: scope.windowEnd, ...(mandateId ? { mandateId } : {}), acknowledge: true });
       state.conversation = await api('/api/conversations/' + c.id); await loadConversations();
+      if (state.view === 'assistant') commitRoute({ view: 'assistant', id: c.id, step: 'payment' });
       window.dispatchEvent(new CustomEvent('floww:select-task', { detail: { id: task.id, prepareQuote: true } }));
     }, { refreshConversation: true });
   });
@@ -487,14 +667,25 @@
   $('refresh-mandates').addEventListener('click', () => run('workspace.loadMandates', loadBudgets));
   $('refresh-activity').addEventListener('click', () => run('workspace.loadActivity', loadActivity));
   window.addEventListener('floww:session', event => {
+    const readyBefore = state.authReady, wallet = event.detail?.wallet ?? null;
+    const generation = Number.isInteger(event.detail?.generation) ? event.detail.generation : null;
+    const renewed = Boolean(wallet && wallet === state.wallet && state.sessionGeneration !== null && generation !== null && generation !== state.sessionGeneration);
     state.health = event.detail?.health;
     state.authReady = event.detail?.initializing !== true;
-    if (state.wallet === event.detail?.wallet) { controls(); return; }
-    const firstLogin = !state.wallet && Boolean(event.detail?.wallet);
+    if (state.wallet === wallet && !renewed) {
+      state.sessionGeneration = generation;
+      if (!readyBefore && state.authReady) hydrateRoute();
+      controls(); return;
+    }
+    const previousWallet = state.wallet;
+    const firstLogin = !state.wallet && Boolean(wallet);
     const draft = firstLogin ? { text: $('message-text').value, wallet: $('intent-wallet').value, start: $('intent-start').value, end: $('intent-end').value } : null;
     const queued = state.guestPending; state.guestPending = null;
-    state.wallet = event.detail?.wallet ?? null; state.epoch++; state.busy = false; state.taskBusy = false; state.selectedTask = null; state.stage = null;
+    if (renewed) saveDraft(); else drafts.clear();
+    state.wallet = wallet; state.sessionGeneration = generation; state.epoch++; state.routeVersion++; state.runToken = null; state.routeLoading = false;
+    state.busy = false; state.taskBusy = false; state.selectedTask = null; state.stage = null; state.pendingFocus = null;
     state.conversation = null; state.conversations = []; state.conversationCursor = null; state.memories = []; state.memoryCursor = null;
+    state.draftBinding = state.route?.view === 'assistant' && state.route.id ? null : 'new';
     state.mandates = []; state.dashboard = null; state.catalog = []; state.activities = []; state.tasks = [];
     state.pendingMessage = null; state.pendingPlan = null;
     $('message-text').value = ''; $('memory-key').value = ''; $('memory-value').value = ''; $('memory-ack').checked = false;
@@ -502,7 +693,12 @@
     $('mandate-start').value = local(Date.now() - 86_400_000); $('mandate-end').value = local(Date.now() - 1000); $('mandate-expiry').value = local(Date.now() + 30 * 86_400_000 - 60_000);
     $('memory-expiry').value = local(Date.now() + 30 * 86_400_000).slice(0, 10);
     syncScope(); status(''); renderOverview(); renderConversationList(); renderConversation(); renderMemory(); renderBudget(); renderActivity();
-    navigate(state.view);
+    if (previousWallet && previousWallet !== wallet) {
+      state.route = { view: state.view }; writeRoute(state.route, 'replace');
+      bindTaskContext(null, { clear: true });
+    }
+    if (state.route?.id) state.pendingFocus = { hash: routeHash(state.route), version: state.routeVersion };
+    hydrateRoute();
     if (draft?.text) {
       $('message-text').value = draft.text; $('intent-wallet').value = draft.wallet; $('intent-start').value = draft.start; $('intent-end').value = draft.end;
       if (queued && JSON.stringify(queued) === JSON.stringify(draft)) $('message-form').requestSubmit();
@@ -510,7 +706,7 @@
   });
   window.addEventListener('floww:selection', event => {
     if (!state.wallet || event.detail?.wallet !== state.wallet) return;
-    state.selectedTask = event.detail.task ?? null; state.taskBusy = event.detail.busy === true; renderJourney(); controls();
+    state.selectedTask = event.detail.task ?? null; state.taskBusy = event.detail.busy === true; renderJourney(); controls(); focusRoute();
   });
   let refreshTimer;
   window.addEventListener('floww:task-updated', () => {
@@ -522,6 +718,6 @@
   $('memory-expiry').value = local(month).slice(0, 10); $('memory-expiry').min = local(today).slice(0, 10); $('memory-expiry').max = local(today.getTime() + 89 * 86_400_000).slice(0, 10);
   $('mandate-start').value = local(today.getTime() - 86_400_000); $('mandate-end').value = local(today.getTime() - 1000); $('mandate-expiry').value = local(month.getTime() - 60_000);
   renderOverview(); renderConversationList(); renderConversation(); renderMemory(); renderBudget(); renderActivity(); controls();
-  navigate('assistant');
+  historyRoute();
   window.dispatchEvent(new CustomEvent('floww:session-refresh'));
 })();

@@ -2,6 +2,11 @@
 (() => {
   'use strict';
   const COPY = {
+  "navigation.invalid": ["주소를 확인할 수 없어 새 요청 화면을 열었습니다.", "This address is unavailable. The request screen is open."],
+  "navigation.signIn": ["지갑으로 로그인한 뒤 내 대화나 작업을 다시 열어 주세요.", "Sign in with your wallet, then reopen your conversation or task."],
+  "navigation.unavailable": ["이 기록에 접근할 수 없습니다. 내 대화나 작업 목록에서 다시 선택해 주세요.", "This record is unavailable. Choose a conversation or task from your own list."],
+  "navigation.stepPending": ["아직 이 단계의 내용이 없습니다. 현재 요청 상태를 확인해 주세요.", "This step has no content yet. Review the current request state."],
+  "navigation.pending": ["이전 요청이 서버에서 처리 중일 수 있습니다. 입력 내용은 보관했습니다. 대화의 최신 상태를 확인한 뒤 이어가세요.", "The previous request may still be processing. Your draft is retained. Review the latest conversation state before continuing."],
   "design.retryPlan": ["계획 다시 시도", "Retry plan"],
   "design.transcript": ["이전 대화 펼쳐 보기", "Review the conversation"],
   "design.planReview": ["계획과 조회 범위 다시 보기", "Review the plan and scope"],

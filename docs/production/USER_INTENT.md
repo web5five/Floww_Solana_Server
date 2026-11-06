@@ -23,7 +23,7 @@ chat, authentication exchanges and private account context are not published.
 | 08:04: Implement, integrate, verify, deploy, verify again and improve visual completeness | 74058 | Continue with observable before/after acceptance, rather than stopping at an implementation report. |
 | 08:11: Steps at the top, page transitions, the same scenario in chat; login before proceeding | 74247,74249 | Make the current stage clear; preserve task identity and require authentication before private work. |
 | 09:06: “한국어면 한국어만 영어면 영어만” and settings | 75520 | Provide a coherent KO/EN interface with a safe persisted language preference. |
-| 09:52: Actual login and user scenarios; prioritize against judging criteria | 77127 | Product completeness and demonstrable outcomes take precedence over generic infrastructure work. Do not invent rubric weights or scores. |
+| 09:52: Actual login/user scenarios; parallel admin dashboard, logs and graphs; identify available data, generate a design image and implement it; prioritize judging criteria | 77127 | Verify the complete user journey and a separately authorized administrator surface. Identify real data before visual design and implementation. Do not treat owner activity as an admin dashboard or invent rubric weights/scores. |
 | 11:09: Record the demo, then keep the judging link accessible | 79458 | Public-origin access and reproducible demonstration evidence remain separate acceptance gates. |
 
 ## Applying the intent to Floww Solana
@@ -42,7 +42,7 @@ panel is shared with the task view. Guest drafting does not create private
 conversations, plans, tasks or signing authority. Keep those boundaries while
 checking login, navigation and owner changes.
 
-This iteration prioritizes the explicit missing language/brand requirements:
+The original-prompt follow-up addressed the language/brand requirements:
 
 - Translate authored navigation, forms, financial consent, status, recovery and
   empty-state copy together. A language change must not submit, refetch, sign,
@@ -89,9 +89,19 @@ incoming transfers and outgoing transfers. They use the current supported
 resource and leave the request local until explicit submission. They do not
 claim to restore three separate legacy scenario pages or payment outcomes.
 
-Still open: explicit step URLs/browser history, voice input and broader
-administrative audit presentation. The shared Task and these starters do not
-establish the complete former scenario-to-deployment journey.
+Read-only hash addresses now cover all six pages, owned conversations/Tasks and
+their request, plan, payment and result sections. Authenticated fresh reload
+and same-document Back/Forward restore the same record without resubmitting an
+action. Stage selection never changes the recorded financial state.
+
+Voice input and broader administrative audit presentation remain open. The
+shared Task, starters and route restoration do not establish the complete
+former scenario-to-deployment journey or current funded settlement.
+
+The administrator request includes its own dashboard, usable logs/graphs, a
+review of the available data and an image-first design-to-code pass. The
+current owner-scoped activity page does not close that requirement. Its
+authorization model and redacted cross-owner data need separate verification.
 
 The user's November6 clarification controls the scope: production-level quality
 for a hackathon entry. An always-on commercial service, paid infrastructure and
