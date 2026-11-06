@@ -1,0 +1,93 @@
+# Improvements grounded in the user's original submission-day prompts
+
+The controller read the actual user-message records from September29,21:00
+through September30,12:00 KST. This is the original GWDC submission period,
+not the later operational-monitoring heartbeat or an assistant's recap.
+The private source is the controller chat's September26 JSONL session; source
+line numbers and KST times below identify the original records. The139 retained
+user-role records include16 structured answers and pasted assistant/team text.
+Only the user's own requests below are treated as product intent. The complete
+chat, authentication exchanges and private account context are not published.
+
+## What the user was asking for
+
+| Original request, September30 KST | Source line | Acceptance meaning for this entry |
+| --- | --- | --- |
+| 00:21: “먼저 엔드투엔드를 봐야할거같아요” | 66514 | Demonstrate an integrated journey; component completion alone is insufficient. |
+| 03:40: “배포까지 진행해서 다시 검증하고” | 70498 | Recheck the actual approved deployment after release. Local success is a separate result. |
+| 06:30: Overview, wallet login, three scenario cards, page transitions and chat execution | 71899 | Keep a clear entry, authenticated execution and one shared Task across guided and conversational use. |
+| 06:32: Keep mock/prototype/MVP labels out of the product | 71971 | Write useful action/result copy; never conceal missing runtime data with invented success. |
+| 07:18: Add a microphone to chat after the voice-agent screen is connected | 73018 | Voice is a requested interaction, not permission for speech to approve payment. Track its current implementation separately. |
+| 07:55: “진짜 백엔드까지 연결돼서 E2E 로 끝나야” and web/mobile visual quality | 73880 | Exercise real interfaces and both viewport sizes. Scripted cases remain explicitly identified in verification records. |
+| 08:01: Match the GitHub organization logo and preserve it as vector artwork | 73992 | Reuse the team's existing reviewed SVG, with source provenance. |
+| 08:04: Implement, integrate, verify, deploy, verify again and improve visual completeness | 74058 | Continue with observable before/after acceptance, rather than stopping at an implementation report. |
+| 08:11: Steps at the top, page transitions, the same scenario in chat; login before proceeding | 74247,74249 | Make the current stage clear; preserve task identity and require authentication before private work. |
+| 09:06: “한국어면 한국어만 영어면 영어만” and settings | 75520 | Provide a coherent KO/EN interface with a safe persisted language preference. |
+| 09:52: Actual login and user scenarios; prioritize against judging criteria | 77127 | Product completeness and demonstrable outcomes take precedence over generic infrastructure work. Do not invent rubric weights or scores. |
+| 11:09: Record the demo, then keep the judging link accessible | 79458 | Public-origin access and reproducible demonstration evidence remain separate acceptance gates. |
+
+## Applying the intent to Floww Solana
+
+Preserve the user's product goals while adapting the implementation to the
+current Solana analytics service. Do not restore pharmacy simulations, EVM
+Scaffold-ETH, old credentials or an obsolete signing model merely because they
+occurred in the earlier prompts. The former three scenarios demonstrated
+success, budget refusal and recipient refusal. Current acceptance must exercise
+those boundaries through the actual current policy and task state transitions;
+three hardcoded success screens would not satisfy the request.
+
+The current goal-first assistant already keeps a guest's draft until wallet
+login, refines scope, reviews a plan and binds a persisted Task. Its payment
+panel is shared with the task view. Guest drafting does not create private
+conversations, plans, tasks or signing authority. Keep those boundaries while
+checking login, navigation and owner changes.
+
+This iteration prioritizes the explicit missing language/brand requirements:
+
+- Translate authored navigation, forms, financial consent, status, recovery and
+  empty-state copy together. A language change must not submit, refetch, sign,
+  alter a user's draft or restore a previous owner's private data.
+- Keep user/model text, evidence, IDs, addresses, exact monetary strings and
+  downloaded report bytes unchanged. Report language follows the report request,
+  rather than a later change to the interface preference.
+- Restore the team's Floww mark from Client
+  `688d14e214dbf0eb728b5e3caa1ad488852da455:public/brand/floww-mark.svg`.
+  The later Client `8c820c270551b82effff06225aa7395322385485` contains the same
+  asset. The runtime serves its local copy; no third-party image request is added.
+- Recheck desktop/390px layout, keyboard access, exact consent and state
+  preservation during login, planning, task selection and recovery.
+
+Next product checks are a versioned KO/EN journey acceptance set and a direct
+audit of scenario entry, stage transitions, same-task continuation and recovery.
+An offline Python packaging check can support this journey, but it does not
+replace these product checks or prove a model/provider is available.
+
+The current [Encode programme](https://www.encodeclub.com/programmes/solana-hackathon-2026)
+was rechecked on November6. Its x402 criteria emphasize useful integration,
+reliable payment-to-access delivery and sensible payment-failure handling.
+Consumer criteria also emphasize onboarding and a working end-to-end experience.
+This supports the product priorities above; the page supplies no numeric
+weights for these criteria. The former GWDC draft score is not this entry's
+official rubric.
+
+## Evidence still required
+
+Whole-interface changes require independent source/state-race review and real
+browser readback. Actual Phantom acceptance, funded Devnet payment/delivery,
+voice interaction and approved public-demo delivery are not established by
+scripted adapters, static screenshots or test counts. The quality ledger in
+[READINESS.md](READINESS.md) keeps those results distinct.
+
+The source audit found real approval-denial states are persisted by the backend,
+but the old UI's generic waiting guidance can obscure them. This iteration adds
+reason-specific denied-state copy and proves ALLOW, budget denial and recipient
+denial through the existing approval interface. ALLOW is still not a payment;
+none of these approval-only checks may call a signer or redemption port.
+
+Still open: explicit step URLs/browser history and three guided entry cards,
+voice input and broader administrative audit presentation. The existing shared
+Task panel is not evidence that these earlier requests have all been restored.
+
+The user's November6 clarification controls the scope: production-level quality
+for a hackathon entry. An always-on commercial service, paid infrastructure and
+enterprise operating commitments are not required by these original prompts.
