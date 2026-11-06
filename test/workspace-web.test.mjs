@@ -6,7 +6,7 @@ for (const oldStatus of [200, 401]) test(`delayed owner-A task poll (${oldStatus
   const old = deferred(); let owner = A, aReads = 0;
   const a = task(TASK_A, 'OWNER_A_PRIVATE_PURPOSE', 'UNKNOWN'), b = task(TASK_B, 'OWNER_B_CURRENT_PURPOSE');
   const h = harness(taskClient, call => {
-    if (call.url === '/api/health') return response({ ready: false, network: 'devnet' });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false, network: 'devnet' });
     if (call.url === '/api/session') return response({ wallet: owner });
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [owner === A ? a : b], nextCursor: null });
     if (call.url === '/api/tasks/' + TASK_A) return ++aReads === 1 ? response(a) : old.promise;
@@ -39,7 +39,7 @@ test('logout removes private task draft, approval and rendered report contents b
   const a = task(TASK_A, 'OWNER_A_PRIVATE_PURPOSE');
   a.result = { answer: { answer_text: 'OWNER_A_PRIVATE_REPORT', limitations: [] }, markdown: 'OWNER_A_PRIVATE_DOWNLOAD' };
   const h = harness(taskClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ wallet: A });
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [a], nextCursor: null });
     if (call.url === '/api/tasks/' + TASK_A) return response(a);
@@ -63,7 +63,7 @@ test('logout removes private task draft, approval and rendered report contents b
 for (const stale of [false, true]) test(`${stale ? 'old-owner' : 'current-owner'} shell 401 ${stale ? 'preserves B session' : 'invalidates core session and private memory view'}`, async () => {
   const late = deferred(); let owner = A, wait = false, started = false;
   const h = harness(taskClient + '\n' + client, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ wallet: owner });
     if (call.url === '/api/dashboard') return response(overview());
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [], nextCursor: null });
@@ -201,7 +201,7 @@ test('task history fetches full results only for the selected summary', async ()
   const first = task(TASK_A, 'First report'), second = task(TASK_B, 'Second report');
   const full = value => ({ ...value, result: { answer: { answer_text: value.id === TASK_A ? 'FIRST_LAZY_REPORT' : 'SECOND_LAZY_REPORT' }, markdown: 'scripted report' } });
   const h = harness(taskClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ wallet: A });
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [first, second].map(value => ({ ...value, resultAvailable: true, result: undefined })), nextCursor: null });
     if (call.url === '/api/tasks/' + TASK_A) return response(full(first));
@@ -223,7 +223,7 @@ test('task history fetches full results only for the selected summary', async ()
 test('retrying an unchanged task after an uncertain HTTP result reuses the same idempotency key', async () => {
   let created = 0;
   const h = harness(taskClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ wallet: A });
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [], nextCursor: null });
     if (call.url === '/api/tasks' && call.method === 'POST') {

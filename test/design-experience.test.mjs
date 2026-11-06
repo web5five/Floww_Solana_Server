@@ -22,7 +22,7 @@ function visiblyPresent(node) {
 }
 async function guest(language = 'ko') {
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ error: { code: 'AUTHENTICATION_REQUIRED' } }, 401);
     assert.fail('A local guest draft must not call a protected route: ' + call.url);
   }, { savedLocale: language });
@@ -36,7 +36,7 @@ async function workspace({ planned = false, linked = false } = {}) {
   const value = task(TASK_A, '확인한 계획으로 생성한 요청');
   const control = { current, message: null, create: null };
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false, merchantConfigured: true });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false, merchantConfigured: true });
     if (call.url === '/api/session') return response({ wallet: A });
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: linked ? [value] : [], nextCursor: null });
     if (call.url === '/api/tasks/' + TASK_A) return response(value);

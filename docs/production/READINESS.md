@@ -51,7 +51,7 @@ of security certification, accessibility conformance or a contractual SLA.
 ## Current iteration evidence
 
 The table's starting checkpoint is historical, not a list of features still
-absent. Released main `2d0d802` includes the reviewed PR11–13 changes:
+absent. Released main `bac6419` includes the reviewed PR11–14 changes:
 
 - P03–P06: dedicated DB/ledger readiness, bounded HTTP shutdown, merchant replay
   admission and redacted fixed-label diagnostics have implementation and
@@ -60,7 +60,7 @@ absent. Released main `2d0d802` includes the reviewed PR11–13 changes:
   versioned scripted journey cases and purpose-led desktop/tablet/phone design
   are verified within the boundaries below. Voice, full keyboard/zoom coverage,
   actual-model quality and funded completion remain open.
-- P10: [PR13's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42241427893)
+- P10: [PR14's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42249469866)
   passed both required PostgreSQL/runtime/Python checks and an actual non-root,
   network-isolated image check. It did not deploy a public service.
 
@@ -96,17 +96,19 @@ dedicated race coverage and native-browser readback. No route authorizes a
 financial operation or creates a replacement request.
 
 Remaining product work includes voice input, broader administrative audit
-presentation, actual-model
-quality acceptance, model-bridge preflight/outage UX, approved public-demo
+presentation, actual-model quality acceptance, approved public-demo
 acceptance and separately approved wallet/funded Devnet completion. None is
 closed by the above test counts.
 
-The existing model failure/retry UI is already implemented. The next packaging
-gap is a bounded, cached offline import check for the configured Python
-workspace/report adapters, before a known local failure consumes model quota
-or starts a new purchase. That check must not call a model or claim provider
-availability. It must also preserve reconciliation and persistence of original
-payment facts when optional report processing is unavailable.
+The adapter follow-up adds one bounded, cached offline packaging check for the
+configured Python workspace/report adapters. Known failure blocks new model
+quota/message writes and new purchase work while preserving draft edits,
+private reads and original-proof recovery. Unknown capability does not enable
+new model/purchase actions. Local406 Node/209 Python checks, native KO/EN/390px
+readback and actual healthy/bad-executable HTTP observations are recorded in
+[VERIFICATION.md](VERIFICATION.md). The check invokes no model and does not claim
+provider availability. Exact-source image CI and later public-demo acceptance
+remain distinct release gates.
 
 Browser-history acceptance in the navigation work covers same-document hash
 Back/Forward and a fresh reload. Whole-document BFCache restoration across an
@@ -127,7 +129,7 @@ live BFCache data leak has been demonstrated by the current audit.
 5. Update this gate ledger with what was actually proven; unresolved gates keep
    the continuing quality goal active. Do not close it because one PR was merged.
 
-## Primary references checked November 6
+## Primary references checked November 6–7
 
 - [OWASP ASVS5.0.0](https://asvs.owasp.org/): verifiable security controls, with
   versioned requirement identifiers for a later explicit coverage mapping.
@@ -142,3 +144,12 @@ live BFCache data leak has been demonstrated by the current audit.
 - [Supabase backups](https://supabase.com/docs/guides/platform/backups) and
   [PostgreSQL16 pg_dump](https://www.postgresql.org/docs/16/app-pgdump.html):
   consistent backup/restore, least privilege and client/server compatibility.
+- [Node child-process lifecycle](https://nodejs.org/api/child_process.html#event-close):
+  process exit and pipe closure are separate events; the packaging deadline
+  must not wait indefinitely for inherited output pipes.
+- [Python3.13 environment controls](https://docs.python.org/3.13/using/cmdline.html#envvar-PYTHONNOUSERSITE):
+  disable user-site imports and bytecode writes while using the fixed adapter
+  source path; do not inherit application credentials into the offline check.
+- [Docker read-only containers](https://docs.docker.com/reference/cli/docker/container/run/#read-only):
+  test the actual non-root image with a read-only root filesystem and external
+  networking disabled, rather than infer image behavior from host imports.

@@ -159,7 +159,8 @@ async function environment(t, opts = {}) {
   const gateway = createGateway(config, { rpc });
   const lifecycle = opts.lifecycle ? createLifecycle({ probe: async () => ({ databaseReady: true, ledgerReady: true }) }) : undefined;
   const mount = (target, context) => mountMerchant(target, { ...context, rpc, facilitator: opts.httpFacilitator ? undefined : facilitator });
-  if (lifecycle) app.use(createApp({ config, store: { clock: Date.now, receipts: receiptStore }, gateway, reportProvider, lifecycle, mountMerchant: mount }));
+  if (lifecycle) app.use(createApp({ config, store: { clock: Date.now, receipts: receiptStore }, gateway, reportProvider, lifecycle, mountMerchant: mount,
+    adapterStatus: { workspaceAdapterReady: true, reportAdapterReady: true } }));
   else mount(app, { config, receiptStore, reportProvider });
   const store = { close() { storeState.closed = true; storeState.closes++; storeClosed.resolve(); } };
   const url = `${origin}/merchant/reports/purchase-1?wallet=${payer.address}&start=2026-11-01T00%3A00%3A00.000Z&end=2026-11-02T00%3A00%3A00.000Z`;

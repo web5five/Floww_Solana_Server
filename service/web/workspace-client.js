@@ -26,6 +26,8 @@
     REFINING: authored('목적 확인 중'), PLANNING: authored('계획 검토 중'), APPROVAL_REQUIRED: authored('계획 확인 필요'), TASK_CREATED: authored('작업 연결됨'),
     LINKING: authored('작업 연결 확인'), ATTENTION_REQUIRED: authored('다시 확인 필요') };
   const errors = {
+    WORKSPACE_ADAPTER_UNAVAILABLE: authored('adapter.workspaceUnavailable'), REPORT_ADAPTER_UNAVAILABLE: authored('adapter.reportUnavailable'),
+    WORKSPACE_READINESS_UNKNOWN: authored('adapter.workspaceUnknown'), REPORT_READINESS_UNKNOWN: authored('adapter.reportUnknown'),
     UNAUTHORIZED_PAYMENT_TERMS: authored("수신자·토큰·네트워크가 승인할 결제 조건과 일치하지 않습니다. 현재 조건을 다시 확인한 뒤 승인하세요. 결제는 시작하지 않았습니다."),
     DAILY_BUDGET_EXCEEDED: authored("서버의 일일 결제 예산 한도에 도달했습니다. 원래 작업의 상태를 확인하고 한도가 이용 가능할 때 다시 진행하세요. 새 결제를 반복하지 마세요."),
     AUTHENTICATION_REQUIRED: authored('지갑을 연결하고 로그인해 주세요.'), MODEL_NOT_CONFIGURED: authored('AI 연결을 준비 중입니다. 작업 화면에서 조회 범위를 직접 지정할 수 있습니다.'),
@@ -73,6 +75,18 @@
   }
   function status(text = '', isError = false) { put($('shell-status'), () => text); $('shell-status').className = 'shell-status' + (isError ? ' is-error' : ''); }
   function errorMessage(error) { return errors[error?.code] ?? authored('요청을 완료하지 못했습니다. 입력한 조건과 현재 상태를 다시 확인해 주세요.'); }
+  function workspaceBlock() {
+    if (state.health?.workspaceAdapterReady === false) return 'WORKSPACE_ADAPTER_UNAVAILABLE';
+    if (state.health?.modelConfigured === false) return 'MODEL_NOT_CONFIGURED';
+    return state.health?.workspaceAdapterReady === true && state.health?.modelConfigured === true ? null : 'WORKSPACE_READINESS_UNKNOWN';
+  }
+  function reportBlock() { return state.health?.reportAdapterReady === true ? null : state.health?.reportAdapterReady === false ? 'REPORT_ADAPTER_UNAVAILABLE' : 'REPORT_READINESS_UNKNOWN'; }
+  function rememberAdapterFailure(error) {
+    const field = error.code === 'WORKSPACE_ADAPTER_UNAVAILABLE' ? 'workspaceAdapterReady' : error.code === 'REPORT_ADAPTER_UNAVAILABLE' ? 'reportAdapterReady' : error.code === 'MODEL_NOT_CONFIGURED' ? 'modelConfigured' : null;
+    if (!field) return;
+    state.health = { ...state.health, [field]: false, ...(field === 'reportAdapterReady' ? { ready: false } : {}) };
+    window.dispatchEvent(new CustomEvent('floww:adapter-unavailable', { detail: { field, wallet: state.wallet, generation: state.sessionGeneration } }));
+  }
   async function api(path, method = 'GET', body) {
     const epoch = state.epoch, routeVersion = state.routeVersion, controller = new AbortController(), timer = setTimeout(() => controller.abort(), 40_000);
     try {
@@ -98,6 +112,7 @@
     try { await action(); if (epoch === state.epoch && state.runToken === token) status(''); }
     catch (error) {
       if (error.stale || epoch !== state.epoch || state.runToken !== token) return;
+      rememberAdapterFailure(error);
       if (refreshConversation && state.conversation) {
         const draft = snapshotDraft();
         try { state.conversation = await api('/api/conversations/' + encodeURIComponent(state.conversation.id)); syncScope(); applyDraft(draft); await loadConversations(); } catch { /* preserve last known view */ }
@@ -196,15 +211,15 @@
     // The mounted task keeps its own exact-quote/health/expiry controls.
     for (const input of document.querySelectorAll('[data-page]:not([data-page=tasks]) input,[data-page]:not([data-page=tasks]) textarea,[data-page]:not([data-page=tasks]) select')) if (!taskControl(input)) input.disabled = locked;
     for (const b of document.querySelectorAll('[data-page]:not([data-page=tasks]) button:not([data-go])')) if (!taskControl(b)) b.disabled = locked;
-    const c = state.conversation, immutable = Boolean(c?.linkedTaskId || c?.planLocked || c?.working);
-    $('send-message').disabled = doing || immutable || !state.authReady; $('message-text').disabled = doing || immutable;
-    put($('send-message'), () => !state.authReady ? authored('연결 확인 중…') : state.wallet ? authored('보내기 ↑') : authored('지갑 연결하고 시작'));
-    $('build-plan').disabled = locked || !c || immutable || c.intent?.missingFields?.length !== 0 || c.status === 'UNSUPPORTED';
-    $('confirm-plan').disabled = locked || !c?.plan || c.working || Boolean(c.linkedTaskId) || planScopeChanged();
+    const c = state.conversation, immutable = Boolean(c?.linkedTaskId || c?.planLocked || c?.working), blocked = workspaceBlock();
+    $('send-message').disabled = doing || immutable || !state.authReady || Boolean(state.wallet && blocked); $('message-text').disabled = doing || immutable;
+    put($('send-message'), () => !state.authReady ? authored('연결 확인 중…') : !state.wallet ? authored(blocked ? '지갑 연결' : '지갑 연결하고 시작') : blocked ? authored(blocked === 'WORKSPACE_ADAPTER_UNAVAILABLE' ? 'adapter.sendUnavailable' : blocked === 'MODEL_NOT_CONFIGURED' ? 'adapter.sendConfiguration' : 'adapter.sendUnknown') : authored('보내기 ↑'));
+    $('build-plan').disabled = locked || Boolean(blocked) || !c || immutable || c.intent?.missingFields?.length !== 0 || c.status === 'UNSUPPORTED';
+    $('confirm-plan').disabled = locked || Boolean(reportBlock()) || !c?.plan || c.working || Boolean(c.linkedTaskId) || planScopeChanged();
     if (c?.planLocked) $('plan-mandate').disabled = true;
-    put($('composer-hint'), () => !state.wallet ? authored('design.guestHint') : immutable ? authored('확정한 범위와 결과를 이 대화에서 이어갑니다.') : doing ? authored('요청을 처리하고 있습니다.') : authored('design.readyHint'));
+    put($('composer-hint'), () => immutable ? authored('확정한 범위와 결과를 이 대화에서 이어갑니다.') : blocked ? authored(blocked === 'WORKSPACE_ADAPTER_UNAVAILABLE' ? 'adapter.draftHint' : blocked === 'MODEL_NOT_CONFIGURED' ? 'adapter.configurationHint' : 'adapter.unknownHint') : !state.wallet ? authored('design.guestHint') : doing ? authored('요청을 처리하고 있습니다.') : authored('design.readyHint'));
     for (const field of ['intent-wallet', 'intent-start', 'intent-end']) $(field).disabled = doing || immutable;
-    $('new-conversation').disabled = locked;
+    $('new-conversation').disabled = locked || Boolean(blocked); $('quick-new').disabled = locked || Boolean(blocked);
     $('create-mandate').disabled = locked || !state.health?.merchantConfigured;
     for (const id of ['suggest-wallet', 'suggest-incoming', 'suggest-outgoing']) $(id).disabled = doing || hasStartedConversation();
     renderPresentation();
@@ -272,15 +287,16 @@
       if (task.result?.answer || task.resultAvailable) { title = authored('요청한 결과가 준비됐어요'); copy = authored('분석 요약과 근거를 먼저 확인하세요. 영수증과 실행 과정은 펼쳐 볼 수 있습니다.'); stage = 3; }
       else if (task.payment === 'UNKNOWN') { title = authored('원래 결제의 확인이 필요해요'); copy = authored('아직 결제 결과가 확정되지 않았습니다. 새 결제를 만들지 않고 원래 거래를 확인하세요.'); }
       else if (['SIGNING', 'PENDING'].includes(task.payment)) { title = authored('승인한 결제를 확인하고 있어요'); copy = authored('결제 확인과 자료 도착을 각각 확인합니다. 같은 요청을 다시 결제하지 않습니다.'); }
-      else if (task.payment === 'CONFIRMED') { title = task.delivery === 'COMPLETED' ? authored('받은 자료의 분석을 확인해 주세요') : authored('결제는 확인됐지만 자료가 아직 도착하지 않았어요'); copy = authored('같은 결제로 자료와 분석을 다시 확인할 수 있습니다. 새 결제는 필요하지 않습니다.'); }
+      else if (task.payment === 'CONFIRMED') { title = task.delivery === 'COMPLETED' ? authored('받은 자료의 분석을 확인해 주세요') : authored('결제는 확인됐지만 자료가 아직 도착하지 않았어요'); copy = () => authored('같은 결제로 자료와 분석을 다시 확인할 수 있습니다. 새 결제는 필요하지 않습니다.') + (reportBlock() ? ' ' + errors[reportBlock()] : ''); }
       else if (task.payment === 'FAILED') { title = authored('거래 실패를 확인했어요'); copy = authored('자동으로 새 결제를 만들지 않습니다. 원래 거래의 기록을 먼저 확인하세요.'); }
       else if (task.approval?.revoked) { title = authored('이 작업의 결제 승인을 취소했어요'); copy = authored('이 승인으로 새 결제를 실행하지 않습니다. 계속하려면 현재 조건을 확인하고 다시 승인하세요.'); }
       else if (task.policy === 'DENY') { title = authored('결제 승인이 거부됨'); copy = denialGuidance(task); }
       else if (task.quote && Date.parse(task.quote.expiresAt) <= Date.now()) { title = authored('결제 조건의 유효 시간이 지났어요'); copy = authored('아직 결제하지 않았습니다. 현재 가격과 조건을 다시 확인한 뒤 승인할 수 있습니다.'); }
       else if (task.quote) { title = authored('결제 조건을 확인하고 진행해 주세요'); copy = () => authored('현재 가격은 ') + quoteAmount(task.quote) + authored(' 토큰입니다. 아래에서 범위·한도·기한을 확인하고 승인하면 실행합니다.'); }
       else { title = state.taskBusy ? authored('이 계획의 결제 조건을 준비하고 있어요') : authored('요청을 저장했어요'); copy = state.health?.merchantConfigured ? authored('아직 결제하지 않았습니다. 현재 요청의 결제 조건을 확인할 수 있습니다.') : authored('자료 제공자의 연결을 준비 중입니다. 결제는 시작하지 않았고, 같은 요청에서 이어갈 수 있습니다.'); }
-    } else if (c?.plan) { title = authored('목적에 맞는 계획을 정리했어요'); copy = planScopeChanged() ? authored('조회 조건을 바꿨다면 메시지로 보내 새 계획을 확인해 주세요.') : authored('아래 범위를 확인하면 정확한 결제 조건을 준비합니다. 아직 결제하지 않습니다.'); stage = 1; }
+    } else if (c?.plan) { title = authored('목적에 맞는 계획을 정리했어요'); copy = reportBlock() ? errors[reportBlock()] : planScopeChanged() ? authored('조회 조건을 바꿨다면 메시지로 보내 새 계획을 확인해 주세요.') : authored('아래 범위를 확인하면 정확한 결제 조건을 준비합니다. 아직 결제하지 않습니다.'); stage = 1; }
     else if (c?.errorCode) { title = authored('요청을 저장하고 잠시 멈췄어요'); copy = errors[c.errorCode] ?? authored('현재 조건을 확인한 뒤 명시적으로 다시 요청할 수 있습니다. 결제는 시작되지 않았습니다.'); }
+    else if (workspaceBlock()) { title = authored('adapter.workspaceStopped'); copy = errors[workspaceBlock()]; }
     else { title = authored('필요한 정보를 함께 정리해요'); copy = authored('분석할 지갑과 기간을 대화로 알려 주세요. 복잡한 항목을 먼저 고를 필요가 없습니다.'); }
     if ($('journey-title').textContent !== title) put($('journey-title'), () => title);
     if ($('journey-copy').textContent !== copy) put($('journey-copy'), () => copy);
@@ -353,6 +369,7 @@
     $('plan-mandate').value = selected; controls(); renderJourney();
   }
   async function createConversation({ carryDraft = false } = {}) {
+    if (workspaceBlock()) throw { code: workspaceBlock() };
     saveDraft(); const draft = carryDraft ? snapshotDraft() : null;
     const c = await api('/api/conversations', 'POST', { useMemory: $('conversation-memory').checked });
     if (!c || !UUID.test(c.id)) throw { code: 'RESPONSE_UNAVAILABLE' };
@@ -602,6 +619,7 @@
     if (state.conversation?.id === c.id) state.conversation = { ...c, messages: [...prior.messages, ...c.messages], previousMessages: prior.previousMessages };
   }));
   async function planCurrent() {
+    if (workspaceBlock()) throw { code: workspaceBlock() };
     const c = state.conversation, key = c.id + ':' + c.intentRevision;
     state.stage = 'planning'; status(authored('필요한 자료와 계획을 검토 중…')); renderJourney();
     if (state.pendingPlan?.key !== key) state.pendingPlan = { key, clientRequestId: crypto.randomUUID(), expectedRevision: c.revision };
@@ -613,9 +631,10 @@
     event.preventDefault(); if (!$('message-form').reportValidity()) return;
     if (!state.authReady) { status(authored('로그인 연결을 확인하고 있습니다. 입력한 내용은 유지합니다.')); return; }
     if (!state.wallet) {
-      state.guestPending = { text: $('message-text').value, wallet: $('intent-wallet').value, start: $('intent-start').value, end: $('intent-end').value };
-      status(authored('요청 내용을 유지합니다. 지갑 로그인 후 이어갑니다.')); $('connect-wallet').click(); return;
+      state.guestPending = workspaceBlock() ? null : { text: $('message-text').value, wallet: $('intent-wallet').value, start: $('intent-start').value, end: $('intent-end').value };
+      status(workspaceBlock() ? errors[workspaceBlock()] : authored('요청 내용을 유지합니다. 지갑 로그인 후 이어갑니다.')); $('connect-wallet').click(); return;
     }
+    if (workspaceBlock()) { status(errors[workspaceBlock()], true); return; }
     run('workspace.refine', async () => {
       const text = $('message-text').value.trim(), scope = explicitScope();
       if (!state.conversation) await createConversation({ carryDraft: true });
@@ -636,6 +655,7 @@
   $('confirm-plan-form').addEventListener('submit', event => {
     event.preventDefault(); if (!$('confirm-plan-form').reportValidity()) return;
     run('workspace.confirm', async () => {
+      if (reportBlock()) throw { code: reportBlock() };
       const c = state.conversation, scope = c.plan.scope, mandateId = $('plan-mandate').value;
       if (planScopeChanged()) throw { code: 'PLAN_SCOPE_CHANGED' };
       const task = await api('/api/conversations/' + c.id + '/confirm', 'POST', { expectedRevision: c.revision, planHash: c.plan.hash,
@@ -675,7 +695,7 @@
     if (state.wallet === wallet && !renewed) {
       state.sessionGeneration = generation;
       if (!readyBefore && state.authReady) hydrateRoute();
-      controls(); return;
+      renderJourney(); controls(); return;
     }
     const previousWallet = state.wallet;
     const firstLogin = !state.wallet && Boolean(wallet);

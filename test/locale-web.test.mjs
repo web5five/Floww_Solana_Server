@@ -30,7 +30,7 @@ async function fixture({ value = quotedTask(), shell = true, language = 'ko' } =
   c.plan.limitations = ['자료가 명시한 제한 원문']; c.linkedTaskId = TASK_A; c.planLocked = true; c.status = 'TASK_CREATED';
   const control = { owner: A, value, read: null, approve: null };
   const h = harness(shell ? fullClient : taskClient, call => {
-    if (call.url === '/api/health') return response({ ready: true, merchantConfigured: true, payer: A });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: true, merchantConfigured: true, payer: A });
     if (call.url === '/api/session') return control.owner ? response({ wallet: control.owner }) : response({ error: { code: 'AUTHENTICATION_REQUIRED' } }, 401);
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [control.owner === B ? task(TASK_B, 'OWNER_B_CURRENT_PURPOSE') : control.value], nextCursor: null });
     if (call.url === pathA && call.method === 'GET') return control.read ? control.read(call) : response(control.value);
@@ -88,7 +88,7 @@ test('all explicitly authored static labels and attributes have English copy wit
 
 test('guest locale toggle preserves exact draft, focus, selections, checkbox state and DOM identity with no new service call', async () => {
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ error: { code: 'AUTHENTICATION_REQUIRED' } }, 401);
     assert.fail('A guest must not call a private service');
   });
@@ -215,7 +215,7 @@ test('locale changes while a model turn is pending preserve scope and busy state
   current.status = 'CLARIFICATION_REQUIRED'; current.intent.wallet = null; current.intent.missingFields = ['wallet'];
   const turn = deferred();
   const h = harness(fullClient, call => {
-    if (call.url === '/api/health') return response({ ready: false });
+    if (call.url === '/api/health') return response({ workspaceAdapterReady: true, reportAdapterReady: true, modelConfigured: true, ready: false });
     if (call.url === '/api/session') return response({ wallet: A });
     if (call.url.startsWith('/api/tasks?')) return response({ tasks: [], nextCursor: null });
     if (call.url === '/api/mandates') return response({ mandates: [] });

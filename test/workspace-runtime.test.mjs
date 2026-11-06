@@ -69,6 +69,7 @@ async function fixture(env = {}) {
   };
   try {
     runtime = await buildRuntime({ config, store, gateway, ai, planner, rpc: forbidden, reportProvider: forbidden,
+      adapterStatus: { workspaceAdapterReady: true, reportAdapterReady: true },
       mountMerchant: () => ({ initialize: forbidden }) });
   } catch (error) { await new Promise(resolve => server.close(resolve)); store.close(); throw error; }
   server.on('request', runtime.app);

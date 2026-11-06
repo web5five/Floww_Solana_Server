@@ -95,6 +95,7 @@ test('real HTTP diagnostics correlate request IDs while excluding private URL an
   const config = loadConfig({ FLOWW_PUBLIC_ORIGIN: origin });
   const telemetry = createRequestTelemetry({ write: line => lines.push(line) });
   const app = createApp({ config, store, gateway: { readiness: async () => ({ ready: false }) },
+    adapterStatus: { workspaceAdapterReady: true, reportAdapterReady: true },
     observeRequest: telemetry.observeRequest });
   server.on('request', app);
   try {

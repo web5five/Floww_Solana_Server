@@ -7,6 +7,7 @@ import { approve, assertApproval, attachQuote, canonical, makeTask, publicTask, 
   signature, termsHash, validateQuote } from './policy.mjs';
 import { digest } from './store.mjs';
 import { createLifecycle } from './lifecycle.mjs';
+import { freezeAdapterStatus, UNAVAILABLE_ADAPTER_STATUS } from './adapter-preflight.mjs';
 
 const safeCode = (value, fallback = 'INTEGRATION_UNAVAILABLE') =>
   typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : fallback;
@@ -25,9 +26,14 @@ function checkSignature(wallet, message, encoded) {
     return verify(null, Buffer.from(message, 'utf8'), key, bytes);
   } catch { return false; }
 }
-export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness, lifecycle: suppliedLifecycle, observeRequest }) {
+export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness, lifecycle: suppliedLifecycle, observeRequest, adapterStatus: suppliedAdapterStatus }) {
   if (config.network !== DEVNET) fail('DEVNET_ONLY', 500);
   const app = express(), expectedHost = new URL(config.origin).host;
+  // Unknown local capability is never silently promoted to ready. Direct
+  // application fixtures must explicitly identify their trusted injected ports.
+  const adapterStatus = freezeAdapterStatus(suppliedAdapterStatus ?? UNAVAILABLE_ADAPTER_STATUS);
+  app.locals.adapterStatus = adapterStatus;
+  const requireReportAdapter = () => { if (!adapterStatus.reportAdapterReady) fail('REPORT_ADAPTER_UNAVAILABLE', 503); };
   const now = () => store.clock();
   const lifecycle = suppliedLifecycle ?? createLifecycle({ probe: async () => {
     const [databaseReady, ledger] = await Promise.all([
@@ -91,13 +97,14 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
   const ready = async ledgerState => {
     try {
       const [state, ledger] = await Promise.all([gateway.readiness(), ledgerState ?? (runtimeReadiness ? runtimeReadiness() : { ready: true })]);
-      return { ready: state?.ready === true && ledger?.ready === true && Boolean(config.merchantPayTo),
+      return { ready: state?.ready === true && ledger?.ready === true && Boolean(config.merchantPayTo) && adapterStatus.reportAdapterReady,
         missing: [...(Array.isArray(state?.missing) ? state.missing.filter(x => typeof x === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(x)).map(x => ({
           payment_configuration: 'PAYMENT_CONFIGURATION', payment_enabled: 'FLOWW_ENABLE_DEVNET_PAYMENTS',
           payer_private_key: 'FLOWW_PAYER_KEY_FILE', valid_payer_private_key: 'FLOWW_PAYER_KEY_FILE',
-        })[x] || x.toUpperCase()) : []), ...(ledger?.ready === true ? [] : [safeCode(ledger?.reasonCode, 'BUDGET_STATE_UNAVAILABLE')])],
+        })[x] || x.toUpperCase()) : []), ...(ledger?.ready === true ? [] : [safeCode(ledger?.reasonCode, 'BUDGET_STATE_UNAVAILABLE')]),
+          ...(adapterStatus.reportAdapterReady ? [] : ['REPORT_ADAPTER'])],
         payer: isAddress(state?.payer) ? state.payer : null };
-    } catch { return { ready: false, missing: ['PAYMENT_RUNTIME'], payer: null }; }
+    } catch { return { ready: false, missing: ['PAYMENT_RUNTIME', ...(adapterStatus.reportAdapterReady ? [] : ['REPORT_ADAPTER'])], payer: null }; }
   };
   routes.get('/livez', (req, res) => res.json({ live: true }));
   routes.get('/readyz', async (req, res) => {
@@ -110,7 +117,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     res.json({ ready: state.ready && database, network: config.network, mode: 'devnet', databaseReady: database,
       paymentEnabled: config.paymentEnabled, merchantConfigured: Boolean(config.merchantPayTo),
       payer: state.payer, missing: [...new Set([...state.missing, ...(!config.merchantPayTo ? ['MERCHANT_PAY_TO'] : []), ...(!database ? ['DATABASE_CONNECTION'] : [])])],
-      modelConfigured: Boolean(config.model && config.apiKey) });
+      modelConfigured: Boolean(config.model && config.apiKey), ...adapterStatus });
   });
   routes.get('/api/session', async (req, res) => {
     const session = await auth(req); res.json({ wallet: session.wallet, expiresAt: new Date(session.expires).toISOString() });
@@ -205,7 +212,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
   routes.post('/api/tasks/:id/quote', async (req, res) => {
     exact(req.body, []); const owner = (await auth(req)).wallet, id = req.params.id;
     return withOperation(req, owner, async () => {
-      const { task, operation } = await begin(id, owner, 'quote', noExecution);
+      const { task, operation } = await begin(id, owner, 'quote', t => { noExecution(t); requireReportAdapter(); });
       try {
         const state = await ready(); await assertSession(req, owner);
         if (!config.merchantPayTo) fail('MERCHANT_NOT_CONFIGURED', 503);
@@ -229,6 +236,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
   });
   routes.post('/api/tasks/:id/approve', async (req, res) => {
     const owner = (await auth(req)).wallet, state = await ready(); await assertSession(req, owner);
+    requireReportAdapter();
     if (!state.ready || !state.payer) fail('PAYMENT_NOT_READY', 503);
     try {
       const task = await store.mutate(req.params.id, owner, t => { approve(t, req.body, config, state.payer, now()); store.event(t, 'APPROVED', 'APPROVED'); });
@@ -274,10 +282,11 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     if (task.payment === 'CONFIRMED' && task.delivery === 'COMPLETED' && !task.result) {
       const approvalId = task.approval?.id, quoteHash = task.quote?.hash;
       if (!task.approval?.revoked) {
-        const analysis = await ai.consume({ ...task.aiSnapshot, proposalRef: task.proposal.ref,
+        const analysis = adapterStatus.reportAdapterReady ? await ai.consume({ ...task.aiSnapshot, proposalRef: task.proposal.ref,
           attemptRef: task.attemptRef, settlementRef: task.transaction,
           deliveryRef: 'delivery_' + task.id, body: task.deliveredBody,
-          policy: 'ALLOW', payment: 'CONFIRMED', fulfillment: 'COMPLETED' });
+          policy: 'ALLOW', payment: 'CONFIRMED', fulfillment: 'COMPLETED' })
+          : { status: 'STOPPED', code: 'REPORT_ADAPTER_UNAVAILABLE' };
         await assertSession(req, owner);
         task = await store.mutate(id, owner, t => {
           if (t.operation?.id !== operation.id || t.approval?.id !== approvalId || t.quote?.hash !== quoteHash || t.approval?.revoked) {
@@ -297,6 +306,10 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
   routes.post('/api/tasks/:id/execute', async (req, res) => {
     exact(req.body, ['approvalId']); const owner = (await auth(req)).wallet, id = req.params.id;
     return withOperation(req, owner, async () => {
+      // Existing claimed/uncertain payment facts take precedence over a local
+      // packaging failure. Never route an old proof into a new signing attempt.
+      const previous = await store.get(id, owner); await assertSession(req, owner);
+      noExecution(previous); requireReportAdapter();
       const state = await ready(); await assertSession(req, owner);
       if (!state.ready || !state.payer) fail('PAYMENT_NOT_READY', 503);
       const { task, operation } = await begin(id, owner, 'execute', t => {
@@ -387,7 +400,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     });
     app.locals.merchant = mountMerchant(app, { config, reportProvider, receiptStore: store.receipts, trackWork: lifecycle.trackWork });
   }
-  if (mountWorkspace) app.locals.workspace = mountWorkspace(routes, { config, store, auth, assertSession, now, respondTask, makeTask, withOperation });
+  if (mountWorkspace) app.locals.workspace = mountWorkspace(routes, { config, store, auth, assertSession, now, respondTask, makeTask, withOperation, adapterStatus });
   app.use(express.static(fileURLToPath(new URL('./web/', import.meta.url)), { index: 'index.html', etag: false, dotfiles: 'deny' }));
   app.use((req, res) => res.status(404).json({ error: { code: 'NOT_FOUND', requestId: req.requestId } }));
   app.use((error, req, res, next) => {

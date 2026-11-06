@@ -84,6 +84,36 @@ supported time word; ordinary purpose/style text remains supported.
 - Browser acceptance, automated ordering/privacy regressions and exact source
   review are recorded separately from actual funded Devnet settlement.
 
+## Availability acceptance contract
+
+An unavailable capability needs a useful next step in the same purpose-led
+interface. It must not erase the user's request or turn old transaction facts
+into a new purchase opportunity.
+
+- Keep the purpose and scope editable when analysis is unavailable. A guest can
+  still draft and explicitly connect their wallet. Never resume a blocked model
+  request automatically after a refresh, login or health-state change.
+- Distinguish unconfigured analysis, a known unavailable local analysis/report
+  adapter, an unchecked capability and payment configuration. A successful local
+  import or a configured credential does not establish model-provider health.
+- Require explicit healthy capability fields before new model work or a new
+  quote/approval/execution. Unknown or malformed fields remain unavailable for
+  those actions; do not turn an old server response into a ready claim.
+- Preserve private reads, completed reports and the original-transaction
+  reconcile/recover actions. A workspace-only failure keeps manual Task paths
+  available; a report failure blocks a new purchase while leaving prior facts
+  and recovery visible. Existing session, ownership and consent checks apply.
+- Explain capability failures in KO/EN through the action affected. Executable
+  paths, interpreter diagnostics, credentials and tracebacks do not belong in
+  the product flow. Keep the current transaction status ahead of optional
+  service diagnostics.
+
+Each runtime startup caches one bounded offline packaging check for its lifetime. HTTP
+health and readiness calls must not spawn another check. `/readyz` remains the
+database/ledger serving gate; optional analysis or disabled payments must not
+remove access to the workspace and its existing records. The exact runtime and
+browser acceptance belongs in [VERIFICATION.md](VERIFICATION.md).
+
 ## Navigation acceptance contract
 
 The six workspace pages and an owned conversation/Task need explicit addresses

@@ -66,5 +66,5 @@ jobs:
           persist-credentials: false
       - name: Build the non-root deployment image
         run: docker build --tag floww-acceptance:${{ github.sha }} .
-      - name: Verify image imports, private routes and default payment guard
-        run: docker run --rm --network none floww-acceptance:${{ github.sha }} node scripts/container-smoke.mjs
+      - name: Verify read-only image imports, private routes and default payment guard
+        run: docker run --rm --read-only --network none --tmpfs /tmp:rw,noexec,nosuid,size=16m floww-acceptance:${{ github.sha }} node scripts/container-smoke.mjs
