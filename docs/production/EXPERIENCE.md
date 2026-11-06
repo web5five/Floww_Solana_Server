@@ -1,5 +1,9 @@
 # Purpose-first experience — 2026-11-06
 
+The visual hierarchy and first-visit acceptance criteria are specified in
+[DESIGN.md](DESIGN.md). The interaction boundaries below remain required while
+the presentation is redesigned.
+
 Geondong asked the controller to reflect Michael's earlier product-management
 and user-experience discussions in the integrated workspace. This change applies
 that direction to the current Solana-transfer capability. It does not record a

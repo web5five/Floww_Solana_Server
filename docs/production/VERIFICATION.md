@@ -146,6 +146,53 @@ GWDC evidence directory. Exact release/CI source binding is recorded separately;
 the checks above do not imply that a public deployment or Phantom transaction
 has happened.
 
+## Purpose-led design validation — 2026-11-07
+
+The design criteria in [DESIGN.md](DESIGN.md) apply Michael's documented
+authorization/accountability direction and the team's natural-conversation
+discussion. The color and layout choices are the implementation, not a claim
+that Michael specified a visual style.
+
+- Local non-PostgreSQL Node suite: **300 passed, zero failed/skipped**. Its
+  84 browser-client cases include12 design regressions for editable starters,
+  pending-work fences, exact Task/component retention, optional transcripts,
+  review/retry placement, language changes and logout. Python: **209 passed**.
+- The internal browser inspected the shipped files at1280×720,768×1024 and
+  390×844, including KO/EN entry, plan review, retry, exact approval, budget
+  refusal, UNKNOWN and a result. A20-message conversation remained available
+  without pushing the current Task or result behind the transcript.
+- In the completed390×844 case, the answer paragraph starts at660px and ends
+  at755px; both synthetic-data and partial-coverage notices remain visible.
+  The completed status is60px tall. The same report precedes receipt details,
+  while DENY and UNKNOWN retain their reason and safe next action.
+- The native retry button is enabled and visible immediately after the stop
+  notice, at539–585px on the phone. Its actual `<details>` ancestor is open.
+  This checks real browser disclosure behavior, not just a DOM harness flag.
+- A planned20-message conversation places the actual review at665px on the
+  phone, ahead of revision input/history. Confirmation remains enabled after
+  the scope facts; the check did not submit that action. Choosing an entry
+  example focused the same local draft, and native Tab reached the primary
+  action with a visible focus ring.
+- All six management views remained reachable on the phone without horizontal
+  clipping. Returning to the conversation retained one shared Task component.
+  Reopening the transcript retained all20 messages; switching locale preserved
+  its open state, exact9-decimal amount and source text.
+- Scripted display cases are loopback-only, serve the actual web assets and
+  reject state-changing requests. They prove presentation/interaction behavior,
+  not user authentication, model quality, settlement or report delivery.
+- Separately, the managed-PostgreSQL preview returned page200, `/livez`200,
+  `/readyz`200 and unauthenticated `/api/tasks`401. Capability health was200
+  with payments disabled and financial readiness false. No model or financial
+  operation was requested during this design acceptance.
+
+The temporary viewport override was reset, the guest draft cleared and the
+actual local preview retained. Source syntax, NFC, workflow lint and Git
+whitespace checks pass; no dependencies or remote account grants were added.
+
+Source review, screenshot measurements and sanitized checks are retained in the
+local GWDC evidence directory. Required PostgreSQL and deployment-image checks
+remain CI gates for the exact PR head; these host checks do not replace them.
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

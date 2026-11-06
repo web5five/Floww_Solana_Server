@@ -4,13 +4,13 @@
   const state = { wallet: null, epoch: 0, view: 'assistant', busy: false, health: null,
     conversations: [], conversationCursor: null, conversation: null, memories: [], memoryCursor: null,
     mandates: [], dashboard: null, catalog: [], activities: [], tasks: [], pendingMessage: null, pendingPlan: null, stage: null, taskBusy: false, selectedTask: null, guestPending: null, authReady: false,
-    scopeBaseline: { wallet: '', start: '', end: '' } };
+    scopeBaseline: { wallet: '', start: '', end: '' }, presentedConversation: null, presentedMessage: null };
   const locale = window.FlowwLocale, authored = locale.copy;
   const put = (node, value) => locale.text(node, value, () => state.epoch);
   const option = (label, value) => { const node = new Option('', value); put(node, label); return node; };
   const views = {
     overview: [authored('YOUR WORKSPACE'), authored('좋은 결정은, 분명한 목적에서.'), authored('목적과 근거, 실행의 흐름을 한곳에서 관리하세요.')],
-    assistant: [authored('YOUR NEXT FLOW'), authored('어떤 결과를 원하세요?'), authored('원하는 일을 말해 주세요. 필요한 정보와 계획을 함께 정리합니다.')],
+    assistant: [authored('design.eyebrow'), authored('design.title'), authored('design.description')],
     tasks: [authored('EXECUTION & EVIDENCE'), authored('모든 실행에, 분명한 근거를.'), authored('승인한 조건부터 결제·자료 전달·분석 결과까지 이어 봅니다.')],
     memory: [authored('YOUR CONTEXT'), authored('다음 대화에도 이어질 맥락.'), authored('직접 저장한 선호를 관리하고 대화마다 사용 여부를 정하세요.')],
     budgets: [authored('BOUNDED AUTHORITY'), authored('한도를 정하고, 흐름을 살피세요.'), authored('목적에 맞는 예산 권한과 예약·사용 내역을 확인하세요.')],
@@ -179,6 +179,10 @@
     try { return Object.entries(explicitScope()).some(([key, value]) => plan.scope[key] !== value); }
     catch { return true; }
   }
+  function hasStartedConversation() {
+    const c = state.conversation;
+    return Boolean(c && (c.messages?.length || c.plan || c.linkedTaskId || c.planLocked || c.working));
+  }
   function controls() {
     const doing = state.busy || state.taskBusy, locked = !state.wallet || doing;
     const taskControl = node => { for (let p = node; p; p = p.parentNode) if (p.id === 'task-execution-column') return true; return false; };
@@ -191,10 +195,12 @@
     $('build-plan').disabled = locked || !c || immutable || c.intent?.missingFields?.length !== 0 || c.status === 'UNSUPPORTED';
     $('confirm-plan').disabled = locked || !c?.plan || c.working || Boolean(c.linkedTaskId) || planScopeChanged();
     if (c?.planLocked) $('plan-mandate').disabled = true;
-    put($('composer-hint'), () => !state.wallet ? authored('요청을 먼저 적어 두세요. 지갑 연결 후 안전하게 이어집니다.') : immutable ? authored('확정한 범위와 결과를 이 대화에서 이어갑니다.') : doing ? authored('요청을 처리하고 있습니다.') : authored('필요한 정보를 대화로 확인합니다. 결제 전 조건을 보여 드려요.'));
+    put($('composer-hint'), () => !state.wallet ? authored('design.guestHint') : immutable ? authored('확정한 범위와 결과를 이 대화에서 이어갑니다.') : doing ? authored('요청을 처리하고 있습니다.') : authored('design.readyHint'));
     for (const field of ['intent-wallet', 'intent-start', 'intent-end']) $(field).disabled = doing || immutable;
     $('new-conversation').disabled = locked;
     $('create-mandate').disabled = locked || !state.health?.merchantConfigured;
+    for (const id of ['suggest-wallet', 'suggest-incoming', 'suggest-outgoing']) $(id).disabled = doing || hasStartedConversation();
+    renderPresentation();
     $('budget-setup-note').hidden = !state.wallet || state.health?.merchantConfigured === true;
     put($('budget-setup-note'), () => authored('자료 제공자의 결제 조건 연결을 준비 중입니다. 연결 후 예산 권한을 만들 수 있습니다.'));
   }
@@ -202,11 +208,49 @@
     const id = state.conversation?.linkedTaskId;
     if (state.wallet && id) window.dispatchEvent(new CustomEvent('floww:select-task', { detail: { id, prepareQuote } }));
   }
+  function renderPresentation() {
+    const c = state.conversation, doing = state.busy || state.taskBusy;
+    const started = hasStartedConversation(), active = started || Boolean(state.stage);
+    document.querySelector('.page-heading').hidden = state.view === 'assistant' && active;
+    document.body.dataset.currentView = state.view;
+    document.body.dataset.assistantState = active ? 'active' : 'idle';
+    $('assistant-surface').dataset.state = active ? 'active' : 'idle';
+    $('dialogue-header').hidden = !active;
+    $('dialogue-empty').hidden = active || doing;
+    $('conversation-tools').hidden = !state.wallet;
+    const retry = Boolean(c?.errorCode && c.status === 'ATTENTION_REQUIRED' && c.intent?.missingFields?.length === 0);
+    $('assistant-inspector').hidden = !c || !(c.plan || retry || c.status === 'READY_TO_PLAN' || c.status === 'PLANNING' || state.stage === 'planning');
+    const sameError = c?.errorCode && !c.plan && !$('journey-card').hidden && $('shell-status').textContent === String(errors[c.errorCode] ?? '');
+    $('shell-status').hidden = Boolean(sameError) || !$('shell-status').textContent;
+    $('message-form').hidden = Boolean(c?.linkedTaskId);
+    const transcript = $('conversation-transcript'), phase = c?.linkedTaskId ? 'linked' : c?.plan ? 'planned' : 'open';
+    transcript.hidden = !c?.messages?.length;
+    transcript.querySelector('summary').hidden = phase === 'open';
+    if (transcript.dataset.phase !== phase) { transcript.open = phase === 'open'; transcript.dataset.phase = phase; }
+    const mode = c?.linkedTaskId ? 'linked' : retry && !c.plan ? 'retry' : 'review';
+    const inspector = $('assistant-inspector'), home = document.querySelector('.assistant-layout');
+    const elevated = mode !== 'linked' && !inspector.hidden;
+    const destination = elevated ? $('assistant-surface') : home;
+    if (inspector.parentNode !== destination) {
+      const focused = inspector.contains(document.activeElement) ? document.activeElement : null;
+      if (elevated) destination.insertBefore(inspector, $('assistant-task-slot'));
+      else destination.append(inspector);
+      // Moving the same control must not lose keyboard focus or scroll the
+      // document away from the current status. It never submits that control.
+      focused?.focus({ preventScroll: true });
+    }
+    if (inspector.dataset.mode !== mode) { inspector.open = mode !== 'linked'; inspector.dataset.mode = mode; }
+    inspector.querySelector('summary').hidden = mode === 'retry';
+    inspector.querySelector('.section-heading').hidden = mode === 'retry';
+    $('plan-content').hidden = mode === 'retry';
+    put($('build-plan'), () => authored(mode === 'retry' ? 'design.retryPlan' : '계획 작성 및 검토'));
+  }
   function renderGuidedTask() {
     const slot = $('assistant-task-slot'), home = $('task-execution-home'), column = $('task-execution-column');
     const linked = state.view === 'assistant' && Boolean(state.wallet && state.conversation?.linkedTaskId);
     const exact = linked && state.selectedTask?.id === state.conversation.linkedTaskId;
     slot.hidden = !linked; $('assistant-task-loading').hidden = Boolean(exact);
+    slot.querySelector('.guided-heading').hidden = Boolean(exact && state.selectedTask.result?.answer);
     if (exact) { if (column.parentNode !== slot) slot.append(column); }
     else if (column.parentNode !== home) home.append(column);
   }
@@ -233,6 +277,9 @@
     else { title = authored('필요한 정보를 함께 정리해요'); copy = authored('분석할 지갑과 기간을 대화로 알려 주세요. 복잡한 항목을 먼저 고를 필요가 없습니다.'); }
     if ($('journey-title').textContent !== title) put($('journey-title'), () => title);
     if ($('journey-copy').textContent !== copy) put($('journey-copy'), () => copy);
+    put($('journey-current-step'), () => String(stage + 1).padStart(2, '0'));
+    $('journey-card').dataset.tone = task?.payment === 'UNKNOWN' || task?.policy === 'DENY' || c?.errorCode ? 'attention' : task?.result?.answer || task?.resultAvailable ? 'complete' : 'neutral';
+    $('journey-card').dataset.answerReady = String(Boolean(task?.result?.answer));
     $('journey-steps').replaceChildren(...[authored('요청 이해'), authored('계획 검토'), authored('결제 조건·실행'), authored('결과와 근거')].map((text, i) => {
       const item = el('li', () => text); if (i === stage) item.setAttribute('aria-current', 'step'); return item;
     }));
@@ -244,11 +291,18 @@
     put($('conversation-state'), () => c ? statuses[c.status] ?? authored('상태 확인') : authored('대화 시작'));
     $('dialogue-empty').hidden = Boolean(c?.messages?.length);
     $('earlier-messages').hidden = !c?.previousMessages;
+    const log = $('dialogue-messages'), priorScroll = log.scrollTop;
+    const lastMessage = c?.messages?.at(-1)?.id ?? null;
+    const newConversation = state.presentedConversation !== (c?.id ?? null);
+    const newMessage = state.presentedMessage !== lastMessage;
+    const nearEnd = !Number.isFinite(log.scrollHeight) || log.scrollHeight - log.scrollTop - log.clientHeight < 80;
+    state.presentedConversation = c?.id ?? null; state.presentedMessage = lastMessage;
     $('dialogue-messages').replaceChildren(...(c?.messages ?? []).map(message => {
       const node = el('article', null, 'message ' + (message.role === 'user' ? 'user' : 'assistant'));
       node.append(el('span', () => message.role === 'user' ? authored('나') : authored('FLOWW ASSISTANT'), 'message-label'), el('p', () => message.text), el('time', () => when(message.at)));
       return node;
     }));
+    if (Number.isFinite(log.scrollHeight)) log.scrollTop = newConversation || (newMessage && nearEnd) ? log.scrollHeight : priorScroll;
     const intent = c?.intent;
     $('intent-summary').replaceChildren(el('p', () => intent?.purpose ?? authored('목적을 알려 주시면 조회 범위를 함께 정리합니다.')));
     if (intent?.missingFields?.length) $('intent-summary').append(el('p', () => authored('확인할 항목: ') + intent.missingFields.map(f => ({ purpose: authored('목적'), wallet: authored('지갑'), windowStart: authored('시작 시간'), windowEnd: authored('종료 시간'), resourceId: authored('자료') })[f] ?? authored('조건')).join(', ')));
@@ -354,11 +408,17 @@
     renderGuidedTask(); controls();
   }
   function selectTask(id) { navigate('tasks'); window.dispatchEvent(new CustomEvent('floww:select-task', { detail: { id } })); }
-  document.querySelectorAll('[data-view]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.view)));
+  document.querySelectorAll('.shell-nav button[data-view]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.view)));
   document.querySelectorAll('[data-go]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.go)));
   $('quick-new').addEventListener('click', async () => { await navigate('assistant'); await run('workspace.createConversation', createConversation); });
   $('new-conversation').addEventListener('click', () => run('workspace.createConversation', createConversation));
-  $('suggest-wallet').addEventListener('click', () => { $('message-text').value = String(authored('최근 지갑 이체를 자산별로 정리하고 싶어요.')); $('message-text').focus(); });
+  for (const [id, key] of [['suggest-wallet', 'design.requestSummary'], ['suggest-incoming', 'design.requestIncoming'], ['suggest-outgoing', 'design.requestOutgoing']]) {
+    $(id).addEventListener('click', () => {
+      if (state.busy || state.taskBusy || hasStartedConversation()) return;
+      $('message-text').value = String(authored(key));
+      $('message-text').focus();
+    });
+  }
   $('more-conversations').addEventListener('click', () => run('workspace.earlierConversations', () => loadConversations(true)));
   $('earlier-messages').addEventListener('click', () => run('workspace.earlierMessages', async () => {
     const c = state.conversation, prior = await api('/api/conversations/' + c.id + '?before=' + encodeURIComponent(c.previousMessages));

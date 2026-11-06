@@ -84,9 +84,14 @@ reason-specific denied-state copy and proves ALLOW, budget denial and recipient
 denial through the existing approval interface. ALLOW is still not a payment;
 none of these approval-only checks may call a signer or redemption port.
 
-Still open: explicit step URLs/browser history and three guided entry cards,
-voice input and broader administrative audit presentation. The existing shared
-Task panel is not evidence that these earlier requests have all been restored.
+The design follow-up supplies three editable starters for transfer summaries,
+incoming transfers and outgoing transfers. They use the current supported
+resource and leave the request local until explicit submission. They do not
+claim to restore three separate legacy scenario pages or payment outcomes.
+
+Still open: explicit step URLs/browser history, voice input and broader
+administrative audit presentation. The shared Task and these starters do not
+establish the complete former scenario-to-deployment journey.
 
 The user's November6 clarification controls the scope: production-level quality
 for a hackathon entry. An always-on commercial service, paid infrastructure and

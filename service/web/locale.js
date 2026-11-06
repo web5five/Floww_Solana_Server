@@ -2,6 +2,97 @@
 (() => {
   'use strict';
   const COPY = {
+  "design.retryPlan": ["계획 다시 시도", "Retry plan"],
+  "design.transcript": ["이전 대화 펼쳐 보기", "Review the conversation"],
+  "design.planReview": ["계획과 조회 범위 다시 보기", "Review the plan and scope"],
+  "design.eyebrow": [
+    "목적은 편하게, 조건은 분명하게",
+    "YOUR INTENT. YOUR TERMS."
+  ],
+  "design.title": [
+    "어떤 일을\n맡겨볼까요?",
+    "What would you like\nto get done?"
+  ],
+  "design.description": [
+    "원하는 결과를 말해 주세요. 자료와 비용을 확인하고, 답변의 근거까지 한곳에서 이어갑니다.",
+    "Tell us what you need. Review the scope and cost, then follow the evidence to your answer."
+  ],
+  "design.tagline": [
+    "위임의 기준을 분명하게",
+    "Intent, with accountability."
+  ],
+  "design.connection": [
+    "연결 상태",
+    "Connection status"
+  ],
+  "design.conversation": [
+    "함께 정리하는 요청",
+    "YOUR REQUEST, IN CONTEXT"
+  ],
+  "design.placeholder": [
+    "알고 싶은 내용이나 맡길 일을 편하게 적어 주세요.",
+    "Describe what you need, in your own words."
+  ],
+  "design.supported": [
+    "지금은 Solana 지갑의 이체 내역을 정리할 수 있어요. 주소와 기간은 대화에서 함께 정합니다.",
+    "Currently available: Solana wallet transfer reports. We’ll clarify the address and period together."
+  ],
+  "design.starters": [
+    "요청 예시",
+    "Request starters"
+  ],
+  "design.summary": [
+    "이체 흐름 한눈에",
+    "Transfers at a glance"
+  ],
+  "design.summaryDetail": [
+    "자산별 입금과 출금 정리",
+    "Incoming and outgoing, by asset"
+  ],
+  "design.incoming": [
+    "들어온 자산만",
+    "What came in"
+  ],
+  "design.incomingDetail": [
+    "선택한 기간의 입금 내역",
+    "Focus on incoming transfers"
+  ],
+  "design.outgoing": [
+    "나간 자산만",
+    "What went out"
+  ],
+  "design.outgoingDetail": [
+    "선택한 기간의 출금 내역",
+    "Focus on outgoing transfers"
+  ],
+  "design.scope": [
+    "주소·기간 직접 지정",
+    "Set an address and period"
+  ],
+  "design.history": [
+    "이전 대화와 기억",
+    "Past conversations and memory"
+  ],
+  "design.requestSummary": [
+    "최근 지갑 이체를 자산별로 정리해 주세요.",
+    "Summarize recent wallet transfers by asset."
+  ],
+  "design.requestIncoming": [
+    "지갑으로 들어온 이체만 자산별로 정리해 주세요.",
+    "Summarize only incoming wallet transfers, grouped by asset."
+  ],
+  "design.requestOutgoing": [
+    "지갑에서 나간 이체만 자산별로 정리해 주세요.",
+    "Summarize only outgoing wallet transfers, grouped by asset."
+  ],
+  "design.guestHint": [
+    "지갑 연결 후 이어집니다.",
+    "Continues after wallet sign-in."
+  ],
+  "design.readyHint": [
+    "조건을 확인하기 전에는 결제하지 않습니다.",
+    "No payment before you review the terms."
+  ],
   "승인 대기": [
     "승인 대기",
     "Awaiting approval"
