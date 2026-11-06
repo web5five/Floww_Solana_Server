@@ -1,6 +1,6 @@
 # Workspace verification checkpoint — 2026-11-06
 
-Local acceptance after the controller integrated the production workspace:
+Initial local acceptance after the controller integrated the production workspace:
 
 - Node runtime suite: **219 passed, zero failed/skipped**. This includes actual
   temporary TLS PostgreSQL connections and limited-role startup, both database
@@ -34,6 +34,33 @@ Local acceptance after the controller integrated the production workspace:
 The controller retained sanitized API readbacks and screenshots in the local
 GWDC evidence directory, outside this repository. No credentials, session
 cookies or payer material were added to source or evidence.
+
+## Purpose-first UX acceptance
+
+- Final Node suite: **254 passed, zero failed/skipped**, with required isolated
+  PostgreSQL checks enabled. Of these, 39 browser-client behavior regressions
+  execute the shipped scripts with a small DOM harness and scripted fetch;
+  eight dedicated checks cover exact decimal/atomic conversions.
+- Final Python suite: **173 passed**. Korean rolling-day expressions preserve
+  frozen windows; unsupported compound/negated durations remain unresolved.
+- Syntax, whitespace and NFC checks cover **56 integration files**.
+  `actionlint` and `git diff --check` passed. No dependencies were added.
+- Actual internal-browser acceptance used managed PostgreSQL and the configured
+  restricted model. One typed request reached the refiner, automatic independent
+  planner/critic and exact-plan confirmation, creating one linked persistent
+  task in the same conversation. The model identifies `gpt-5.4-mini`.
+- Reload preserved the same linked task and exact original millisecond scope.
+  An unconfigured merchant stopped quote preparation; payment/delivery stayed
+  `NOT_STARTED`, with no quote, approval or transaction. The generated signed
+  test identity is separate from a user's Phantom-extension acceptance.
+- Guest login failure preserved the draft. Desktop and 390px mobile screens
+  were visually checked; long addresses wrap, optional progress opens, and
+  logout removes private task/conversation content and form drafts. The
+  temporary viewport was reset and the test session logged out.
+
+See [EXPERIENCE.md](EXPERIENCE.md) for the product sources, interpretation and
+preserved approval boundaries. Local screenshots and sanitized API readbacks
+are outside this repo; live funded settlement is not part of these results.
 
 ## Required external gates
 

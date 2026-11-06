@@ -5,6 +5,16 @@ conversations and plans, tasks and reports, explicit preferences, scoped budgets
 and activity. All private API owners come from the signed wallet session.
 Neither browser-supplied owner IDs nor language-model output select an owner.
 
+The initial page is the conversational assistant. Guests can prepare a local
+draft, and an explicit completed login continues the unchanged request once.
+With complete supported scope, intent refinement and the separate planner/critic
+run as one user interaction. A visible exact-plan action prepares the task and
+its quote in the same conversation. The financial checkbox and action still
+require consent to the actual payee, token, price, budget and deadline before
+the same approved task can execute. There is one task component, shared with
+the task view; history, direct scope editing and execution receipts are optional
+disclosures. See [EXPERIENCE.md](EXPERIENCE.md) for sources and UX boundaries.
+
 ## Conversation to task
 
 1. `POST /api/conversations {useMemory:false}` creates a private aggregate.
