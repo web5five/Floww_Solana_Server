@@ -14,14 +14,14 @@
   <script src="/app.js" defer></script>
   <script src="/workspace-client.js" defer></script>
 </head>
-<body>
+<body data-current-view="assistant" data-assistant-state="idle">
   <a class="skip-link" href="#workspace-top"><span data-copy="워크스페이스로 건너뛰기">워크스페이스로 건너뛰기</span></a>
   <header class="site-header">
     <a class="brand" href="/" aria-label="Floww 홈" data-copy-aria-label="Floww 홈">
       <img class="brand-symbol" src="/floww-mark.svg" alt="" width="31" height="36" aria-hidden="true">
       <span>Floww<span class="brand-dot">.</span></span>
     </a>
-    <span class="header-context"><span data-copy="Intelligence workspace">Intelligence workspace</span></span>
+    <span class="header-context"><span data-copy="design.tagline">위임의 기준을 분명하게</span></span>
     <div class="header-actions">
       <select id="interface-language" class="locale-control" aria-label="화면 언어" data-copy-aria-label="화면 언어"><option value="ko">KO</option><option value="en">EN</option></select>
       <span class="network-pill"><span class="network-dot"></span>Solana Devnet</span>
@@ -34,16 +34,17 @@
     <aside class="shell-sidebar" aria-label="워크스페이스 메뉴" data-copy-aria-label="워크스페이스 메뉴">
       <p class="nav-label"><span data-copy="WORKSPACE">WORKSPACE</span></p>
       <nav class="shell-nav">
-        <button type="button" data-view="assistant" aria-current="page"><span aria-hidden="true">✳</span> <span data-copy="AI 어시스턴트">AI 어시스턴트</span></button>
+        <button type="button" data-view="assistant" aria-current="page"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5Z"/></svg> <span data-copy="AI 어시스턴트">AI 어시스턴트</span></button>
         <details class="management-nav"><summary><span data-copy="기록과 설정">기록과 설정</span></summary><div>
-          <button type="button" data-view="overview"><span aria-hidden="true">◈</span> <span data-copy="개요">개요</span></button>
-          <button type="button" data-view="tasks"><span aria-hidden="true">▤</span> <span data-copy="작업 및 결과">작업 및 결과</span></button>
-          <button type="button" data-view="memory"><span aria-hidden="true">⌘</span> <span data-copy="나의 기억">나의 기억</span></button>
-          <button type="button" data-view="budgets"><span aria-hidden="true">◉</span> <span data-copy="예산 및 권한">예산 및 권한</span></button>
-          <button type="button" data-view="activity"><span aria-hidden="true">↗</span> <span data-copy="활동 기록">활동 기록</span></button>
+          <button type="button" data-view="overview"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg> <span data-copy="개요">개요</span></button>
+          <button type="button" data-view="tasks"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg> <span data-copy="작업 및 결과">작업 및 결과</span></button>
+          <button type="button" data-view="memory"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v4m8-4v4M8 17v4m8-4v4M3 8h4m-4 8h4m10-8h4m-4 8h4"/><rect x="7" y="7" width="10" height="10" rx="2"/></svg> <span data-copy="나의 기억">나의 기억</span></button>
+          <button type="button" data-view="budgets"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4 3 7 8 9 5-2 8-5 8-9V6Z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg> <span data-copy="예산 및 권한">예산 및 권한</span></button>
+          <button type="button" data-view="activity"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19V5m0 14h16M8 14l4-5 4 3 4-7"/></svg> <span data-copy="활동 기록">활동 기록</span></button>
+          <details class="support-status"><summary><span class="support-dot" aria-hidden="true"></span><span data-copy="design.connection">연결 상태</span></summary><div class="support-body"><span class="tiny-label"><span data-copy="실행 환경">실행 환경</span></span><strong id="health-status"><span data-copy="설정 상태 확인 중">설정 상태 확인 중</span></strong><p id="health-detail"><span data-copy="현재 연결을 확인하고 있습니다.">현재 연결을 확인하고 있습니다.</span></p><span class="sidebar-network"><i></i> SOLANA DEVNET</span></div></details>
         </div></details>
       </nav>
-      <div class="sidebar-bottom"><span class="tiny-label"><span data-copy="실행 환경">실행 환경</span></span><strong id="health-status"><span data-copy="설정 상태 확인 중">설정 상태 확인 중</span></strong><p id="health-detail"><span data-copy="현재 연결을 확인하고 있습니다.">현재 연결을 확인하고 있습니다.</span></p><span class="sidebar-network"><i></i> SOLANA DEVNET</span></div>
+
     </aside>
     <main id="workspace-top" class="shell-main" tabindex="-1">
       <div class="page-heading"><div><p class="eyebrow" id="view-eyebrow"><span data-copy="YOUR NEXT FLOW">YOUR NEXT FLOW</span></p><h1 id="view-title"><span data-copy="어떤 결과를 원하세요?">어떤 결과를 원하세요?</span></h1><p id="view-description"><span data-copy="원하는 일을 말해 주세요. 필요한 정보와 계획을 함께 정리합니다.">원하는 일을 말해 주세요. 필요한 정보와 계획을 함께 정리합니다.</span></p></div><button class="button button-dark" id="quick-new" type="button" hidden><span data-copy="새 대화">새 대화</span> <span aria-hidden="true">＋</span></button></div>
@@ -58,22 +59,49 @@
         <section class="panel resource-panel"><div class="section-heading"><h2><span data-copy="연결된 자료">연결된 자료</span></h2><span class="small-tag"><span data-copy="RESOURCE CATALOG">RESOURCE CATALOG</span></span></div><div id="resource-catalog"></div></section>
       </section>
 
-      <section data-page="assistant" aria-label="AI 어시스턴트" data-copy-aria-label="AI 어시스턴트">
-        <section id="journey-card" class="journey-card" aria-label="요청 진행 상태" hidden data-copy-aria-label="요청 진행 상태"><div role="status" aria-live="polite" aria-atomic="true"><span class="tiny-label"><span data-copy="지금 진행 중인 일">지금 진행 중인 일</span></span><h2 id="journey-title"></h2><p id="journey-copy"></p></div><details><summary><span data-copy="진행 과정 보기">진행 과정 보기</span></summary><ol id="journey-steps"></ol></details></section>
-        <div class="assistant-layout"><aside class="panel conversation-sidebar"><details class="conversation-history"><summary><span data-copy="이전 대화와 기억 설정">이전 대화와 기억 설정</span></summary><div><div class="section-heading"><h2><span data-copy="내 대화">내 대화</span></h2><button id="new-conversation" class="text-button" type="button" aria-label="새 대화 만들기" data-copy-aria-label="새 대화 만들기"><span data-copy="＋ 새로 만들기">＋ 새로 만들기</span></button></div><label class="check-label memory-choice"><input id="conversation-memory" type="checkbox"><span><span data-copy="새 대화에서 저장한 기억 참고">새 대화에서 저장한 기억 참고</span></span></label><div id="conversation-list" class="conversation-list"></div><button id="more-conversations" type="button" class="text-button list-more" hidden><span data-copy="이전 대화 더 보기">이전 대화 더 보기</span></button></div></details></aside>
-          <section class="panel dialogue-panel"><div class="dialogue-header"><div><span class="tiny-label"><span data-copy="PURPOSE → PLAN">PURPOSE → PLAN</span></span><h2 id="conversation-title"><span data-copy="무엇을 알아보고 싶으세요?">무엇을 알아보고 싶으세요?</span></h2></div><span id="conversation-state" class="state-pill"><span data-copy="대화 시작">대화 시작</span></span></div><button id="earlier-messages" class="text-button" type="button" hidden><span data-copy="이전 메시지 보기">이전 메시지 보기</span></button><div id="dialogue-messages" class="dialogue-messages" role="log" aria-live="polite" aria-label="AI와의 대화" data-copy-aria-label="AI와의 대화"></div>
-            <form id="message-form" class="message-composer"><label class="sr-only" for="message-text"><span data-copy="요청 내용">요청 내용</span></label><textarea id="message-text" rows="3" maxlength="2000" placeholder="알고 싶은 내용이나 수정할 조건을 입력해 주세요." required data-copy-placeholder="알고 싶은 내용이나 수정할 조건을 입력해 주세요."></textarea><div class="composer-footer"><span id="composer-hint"><span data-copy="요청을 먼저 적어 두세요. 지갑 연결 후 안전하게 이어집니다.">요청을 먼저 적어 두세요. 지갑 연결 후 안전하게 이어집니다.</span></span><button id="send-message" class="button button-dark" type="submit" disabled><span data-copy="보내기 ↑">보내기 ↑</span></button></div></form><div id="dialogue-empty" class="dialogue-empty"><span aria-hidden="true">✳</span><h3><span data-copy="원하는 일을 편하게 말해 주세요.">원하는 일을 편하게 말해 주세요.</span></h3><p><span data-copy="지금은 Solana 지갑의 이체 내역을 정리할 수 있어요.">지금은 Solana 지갑의 이체 내역을 정리할 수 있어요.</span><br><span data-copy="부족한 정보는 대화로 확인하고, 결제 전 조건을 보여 드립니다.">부족한 정보는 대화로 확인하고, 결제 전 조건을 보여 드립니다.</span></p><button class="suggestion" id="suggest-wallet" type="button"><span data-copy="최근 지갑 이체를 자산별로 정리하고 싶어요 ↗">최근 지갑 이체를 자산별로 정리하고 싶어요 ↗</span></button></div>
+      <section id="assistant-surface" data-page="assistant" aria-label="AI 어시스턴트" data-copy-aria-label="AI 어시스턴트" data-state="idle">
+        <div id="dialogue-header" class="dialogue-header" hidden><div><span class="tiny-label" data-copy="design.conversation">함께 정리하는 요청</span><h1 id="conversation-title"></h1></div><span id="conversation-state" class="state-pill"></span><button id="new-conversation" class="text-button" type="button" aria-label="새 대화 만들기" data-copy-aria-label="새 대화 만들기"><span data-copy="＋ 새로 만들기">＋ 새로 만들기</span></button></div>
+        <section id="journey-card" class="journey-card" aria-label="요청 진행 상태" data-copy-aria-label="요청 진행 상태" hidden>
+          <span id="journey-current-step" class="journey-index" aria-hidden="true">01</span>
+          <div class="journey-current" role="status" aria-live="polite" aria-atomic="true"><span class="tiny-label" data-copy="지금 진행 중인 일">지금 진행 중인 일</span><h2 id="journey-title"></h2><p id="journey-copy"></p></div>
+          <details class="journey-details"><summary><span data-copy="진행 과정 보기">진행 과정 보기</span></summary><ol id="journey-steps"></ol></details>
+        </section>
+        <div id="assistant-task-slot" class="guided-task" hidden><div class="guided-heading"><h2><span data-copy="요청한 결과와 결제 조건">요청한 결과와 결제 조건</span></h2></div><p id="assistant-task-loading" class="section-copy"><span data-copy="같은 작업의 현재 상태를 불러오고 있습니다.">같은 작업의 현재 상태를 불러오고 있습니다.</span></p></div>
+        <div class="assistant-layout">
+          <section class="panel dialogue-panel">
+
+            <details id="conversation-transcript" class="conversation-transcript" data-phase="open" open><summary><span data-copy="design.transcript">이전 대화 펼쳐 보기</span></summary>
+            <button id="earlier-messages" class="text-button" type="button" hidden><span data-copy="이전 메시지 보기">이전 메시지 보기</span></button>
+            <div id="dialogue-messages" class="dialogue-messages" role="log" tabindex="0" aria-live="polite" aria-label="AI와의 대화" data-copy-aria-label="AI와의 대화"></div>
+            </details>
+            <form id="message-form" class="message-composer">
+              <label class="sr-only" for="message-text"><span data-copy="요청 내용">요청 내용</span></label>
+              <textarea id="message-text" rows="3" maxlength="2000" placeholder="어떤 결과가 필요한지 편하게 적어 주세요." data-copy-placeholder="design.placeholder" required></textarea>
+              <div class="composer-footer"><span id="composer-hint"></span><button id="send-message" class="button button-dark" type="submit" disabled><span data-copy="보내기 ↑">보내기 ↑</span></button></div>
+            </form>
+            <div id="dialogue-empty" class="dialogue-empty">
+              <p class="capability-note"><span class="capability-dot" aria-hidden="true"></span><span data-copy="design.supported">지금은 Solana 지갑의 이체 내역을 정리할 수 있어요. 주소와 기간은 대화에서 함께 정합니다.</span></p>
+              <div class="request-starters" aria-label="요청 예시" data-copy-aria-label="design.starters">
+                <button id="suggest-wallet" class="request-starter" type="button"><svg class="starter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><strong data-copy="design.summary">이체 흐름 한눈에</strong><span data-copy="design.summaryDetail">자산별 입금과 출금 정리</span><span class="starter-arrow" aria-hidden="true">↗</span></button>
+                <button id="suggest-incoming" class="request-starter" type="button"><svg class="starter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v12m-5-5 5 5 5-5M4 17v3h16v-3"/></svg><strong data-copy="design.incoming">들어온 자산만</strong><span data-copy="design.incomingDetail">선택한 기간의 입금 내역</span><span class="starter-arrow" aria-hidden="true">↗</span></button>
+                <button id="suggest-outgoing" class="request-starter" type="button"><svg class="starter-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17V5m-5 5 5-5 5 5M4 17v3h16v-3"/></svg><strong data-copy="design.outgoing">나간 자산만</strong><span data-copy="design.outgoingDetail">선택한 기간의 출금 내역</span><span class="starter-arrow" aria-hidden="true">↗</span></button>
+              </div>
+            </div>
           </section>
-          <aside class="assistant-inspector"><details class="panel scope-details"><summary><span data-copy="조회 조건 직접 입력">조회 조건 직접 입력</span></summary><div><div class="section-heading"><span class="step-number">01</span><h2><span data-copy="조회 범위">조회 범위</span></h2></div><p class="section-copy"><span data-copy="주소와 시간을 직접 지정하면 다음 메시지에 함께 반영합니다.">주소와 시간을 직접 지정하면 다음 메시지에 함께 반영합니다.</span></p><label for="intent-wallet"><span data-copy="Solana 지갑">Solana 지갑</span></label><input id="intent-wallet" maxlength="44" spellcheck="false" autocomplete="off" placeholder="분석할 지갑 주소" data-copy-placeholder="분석할 지갑 주소"><label for="intent-start"><span data-copy="시작 · 현지 시간">시작 · 현지 시간</span></label><input id="intent-start" type="datetime-local" step="1"><label for="intent-end"><span data-copy="종료 · 현지 시간">종료 · 현지 시간</span></label><input id="intent-end" type="datetime-local" step="1"><div id="intent-summary" class="scope-summary"></div></div></details><section class="panel plan-panel"><div class="section-heading"><span class="step-number">02</span><h2><span data-copy="실행 계획">실행 계획</span></h2></div><div id="plan-content"><p class="section-copy"><span data-copy="목적과 범위가 정해지면 AI가 자료를 선택하고 별도로 검토합니다.">목적과 범위가 정해지면 AI가 자료를 선택하고 별도로 검토합니다.</span></p></div><button id="build-plan" class="button button-quiet button-wide" type="button" disabled><span data-copy="계획 작성 및 검토">계획 작성 및 검토</span></button><form id="confirm-plan-form" hidden><details class="budget-choice"><summary><span data-copy="저장한 예산 권한 사용">저장한 예산 권한 사용</span></summary><label for="plan-mandate"><span data-copy="적용할 예산 권한">적용할 예산 권한</span></label><select id="plan-mandate"><option value="" data-copy="이번 작업의 조건을 별도 승인">이번 작업의 조건을 별도 승인</option></select></details><button class="button button-dark button-wide" type="submit" id="confirm-plan"><span data-copy="이 범위로 결제 조건 확인 ↗">이 범위로 결제 조건 확인 ↗</span></button><p class="input-note"><span data-copy="아직 결제하지 않습니다. 정확한 가격을 준비한 뒤 이 대화에서 승인합니다.">아직 결제하지 않습니다. 정확한 가격을 준비한 뒤 이 대화에서 승인합니다.</span></p></form></section></aside>
+          <div class="assistant-utilities">
+            <details class="scope-details"><summary><svg class="utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6m8 4v6"/></svg><span data-copy="design.scope">주소·기간 직접 지정</span></summary><div class="scope-fields"><p class="section-copy" data-copy="주소와 시간을 직접 지정하면 다음 메시지에 함께 반영합니다.">주소와 시간을 직접 지정하면 다음 메시지에 함께 반영합니다.</p><label for="intent-wallet"><span data-copy="Solana 지갑">Solana 지갑</span></label><input id="intent-wallet" maxlength="44" spellcheck="false" autocomplete="off" placeholder="분석할 지갑 주소" data-copy-placeholder="분석할 지갑 주소"><div class="date-fields"><div><label for="intent-start"><span data-copy="시작 · 현지 시간">시작 · 현지 시간</span></label><input id="intent-start" type="datetime-local" step="1"></div><div><label for="intent-end"><span data-copy="종료 · 현지 시간">종료 · 현지 시간</span></label><input id="intent-end" type="datetime-local" step="1"></div></div><div id="intent-summary" class="scope-summary"></div></div></details>
+            <aside id="conversation-tools" class="conversation-sidebar" hidden><details class="conversation-history"><summary><svg class="utility-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 2.6 7M3 4v7h7M12 7v5l3 2"/></svg><span data-copy="design.history">이전 대화와 기억</span></summary><div class="history-content"><div class="section-heading"><h2><span data-copy="내 대화">내 대화</span></h2></div><label class="check-label memory-choice"><input id="conversation-memory" type="checkbox"><span data-copy="새 대화에서 저장한 기억 참고">새 대화에서 저장한 기억 참고</span></label><div id="conversation-list" class="conversation-list"></div><button id="more-conversations" type="button" class="text-button list-more" hidden><span data-copy="이전 대화 더 보기">이전 대화 더 보기</span></button></div></details></aside>
+          </div>
+          <details id="assistant-inspector" class="assistant-inspector" hidden><summary><span data-copy="design.planReview">계획과 조회 범위 다시 보기</span></summary><section class="panel plan-panel"><div class="section-heading"><h2><span data-copy="실행 계획">실행 계획</span></h2></div><div id="plan-content"></div><button id="build-plan" class="button button-quiet button-wide" type="button" disabled><span data-copy="계획 작성 및 검토">계획 작성 및 검토</span></button><form id="confirm-plan-form" hidden><details class="budget-choice"><summary><span data-copy="저장한 예산 권한 사용">저장한 예산 권한 사용</span></summary><label for="plan-mandate"><span data-copy="적용할 예산 권한">적용할 예산 권한</span></label><select id="plan-mandate"><option value="" data-copy="이번 작업의 조건을 별도 승인">이번 작업의 조건을 별도 승인</option></select></details><button class="button button-dark button-wide" type="submit" id="confirm-plan"><span data-copy="이 범위로 결제 조건 확인 ↗">이 범위로 결제 조건 확인 ↗</span></button><p class="input-note"><span data-copy="아직 결제하지 않습니다. 정확한 가격을 준비한 뒤 이 대화에서 승인합니다.">아직 결제하지 않습니다. 정확한 가격을 준비한 뒤 이 대화에서 승인합니다.</span></p></form></section></details>
         </div>
-        <div id="assistant-task-slot" class="guided-task" hidden><h2><span data-copy="요청한 결과와 결제 조건">요청한 결과와 결제 조건</span></h2><p id="assistant-task-loading" class="section-copy"><span data-copy="같은 작업의 현재 상태를 불러오고 있습니다.">같은 작업의 현재 상태를 불러오고 있습니다.</span></p></div>
+
       </section>
 
       <section data-page="tasks" id="workspace" class="workspace" hidden aria-label="작업 및 결과" data-copy-aria-label="작업 및 결과">
     <div class="workspace-grid">
       <aside class="request-column" aria-label="자료 요청과 내 기록" data-copy-aria-label="자료 요청과 내 기록">
         <section class="panel request-panel" aria-labelledby="request-title">
-          <div class="section-heading"><span class="step-number">01</span><h2 id="request-title"><span data-copy="새 자료 요청">새 자료 요청</span></h2></div>
+          <div class="section-heading"><h2 id="request-title"><span data-copy="새 자료 요청">새 자료 요청</span></h2></div>
           <p class="section-copy"><span data-copy="분석할 지갑과 기간을 정해 주세요.">분석할 지갑과 기간을 정해 주세요.</span></p>
           <form id="request-form">
             <label for="purpose"><span data-copy="요청 목적">요청 목적</span></label>
@@ -115,7 +143,7 @@
             <div id="proposal-note" class="proposal-note" hidden></div>
 
             <form id="approval-form" class="approval-form" hidden>
-              <div class="section-heading"><span class="step-number">02</span><h3><span data-copy="결제 조건 승인">결제 조건 승인</span></h3></div>
+              <div class="section-heading"><h3><span data-copy="결제 조건 승인">결제 조건 승인</span></h3></div>
               <div class="approval-fields"><div><label for="budget"><span data-copy="이번 작업의 최대 예산 · 토큰">이번 작업의 최대 예산 · 토큰</span></label><input id="budget" type="text" inputmode="decimal" pattern="[0-9]+([.][0-9]{1,18})?" maxlength="40" required></div><div><label for="approval-expiry"><span data-copy="승인 기한 · 현지 시간">승인 기한 · 현지 시간</span></label><input id="approval-expiry" type="datetime-local" step="1" required></div></div>
               <label class="check-label" for="approval-ack"><input id="approval-ack" type="checkbox" required><span><span data-copy="표시된 수신자·토큰·금액과 기한에 동의하며, Devnet 서비스 지갑의 결제를 승인합니다.">표시된 수신자·토큰·금액과 기한에 동의하며, Devnet 서비스 지갑의 결제를 승인합니다.</span></span></label>
               <button id="approve-task" class="button button-dark" type="submit"><span data-copy="이 조건으로 승인하고 실행">이 조건으로 승인하고 실행</span></button>
@@ -126,8 +154,9 @@
           </section>
 
           <div class="results-grid">
-            <details class="timeline-details"><summary><span data-copy="실행 기록과 영수증 보기">실행 기록과 영수증 보기</span></summary><section class="panel timeline-panel" aria-labelledby="timeline-title"><div class="section-heading"><span class="step-number">03</span><h2 id="timeline-title"><span data-copy="실행 기록">실행 기록</span></h2></div><ol id="timeline" class="timeline"></ol><div id="transaction-wrap" class="transaction-wrap" hidden><span class="tiny-label"><span data-copy="확인된 거래">확인된 거래</span></span><a id="transaction-link" target="_blank" rel="noopener noreferrer"></a></div></section></details>
             <section class="panel result-panel" aria-labelledby="result-title"><div class="section-heading result-heading"><h2 id="result-title"><span data-copy="분석 결과">분석 결과</span></h2><button id="download-report" class="text-button" type="button" hidden><span data-copy="보고서 저장 ↓">보고서 저장 ↓</span></button></div><div id="result-empty" class="result-empty"><span aria-hidden="true">≋</span><p><span data-copy="자료 전달이 확인되면">자료 전달이 확인되면</span><br><span data-copy="분석 결과가 여기에 나타납니다.">분석 결과가 여기에 나타납니다.</span></p></div><div id="result-content" hidden></div></section>
+            <details class="timeline-details"><summary><span data-copy="실행 기록과 영수증 보기">실행 기록과 영수증 보기</span></summary><section class="panel timeline-panel" aria-labelledby="timeline-title"><div class="section-heading"><h2 id="timeline-title"><span data-copy="실행 기록">실행 기록</span></h2></div><ol id="timeline" class="timeline"></ol><div id="transaction-wrap" class="transaction-wrap" hidden><span class="tiny-label"><span data-copy="확인된 거래">확인된 거래</span></span><a id="transaction-link" target="_blank" rel="noopener noreferrer"></a></div></section></details>
+
           </div>
         </div>
       </section></div>

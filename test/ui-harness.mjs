@@ -33,6 +33,13 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
       child.remove(); child.parentNode = this;
     } this.children.push(child); } }
     appendChild(child) { this.append(child); return child; }
+    insertBefore(child, reference) {
+      if (reference == null) { this.append(child); return child; }
+      if (!this.children.includes(reference)) throw new Error('Reference is not a child');
+      if (child === reference) return child;
+      child.remove(); child.parentNode = this;
+      this.children.splice(this.children.indexOf(reference), 0, child); return child;
+    }
     replaceChildren(...children) { for (const child of this.children) if (typeof child === 'object') child.parentNode = null; this.children = []; this.ownText = ''; this.append(...children); }
     setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = String(value); if (['title', 'placeholder', 'lang'].includes(key)) this[key] = String(value); if (key.startsWith('data-')) this.dataset[key.slice(5)] = String(value); }
     getAttribute(key) { if (key === 'class') return this.className ?? null; if (key.startsWith('data-')) return this.dataset[key.slice(5)] ?? null; return this.attributes[key] ?? null; }
@@ -78,6 +85,7 @@ function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageD
       if (key === 'value') node.value = node.defaultValue = value;
       if (key === 'checked') node.checked = node.defaultChecked = true;
       if (key === 'hidden') node.hidden = true;
+      if (key === 'open') node.open = true;
     }
     if (!voids.has(tag.toLowerCase()) && !attrs.trim().endsWith('/')) stack.push(node);
   }

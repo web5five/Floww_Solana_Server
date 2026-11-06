@@ -63,8 +63,16 @@ exports; actual-model quality is still unevaluated by these scripted cases.
 Local follow-up checks pass288 non-PostgreSQL Node tests and209 Python tests.
 Required PostgreSQL and image acceptance remain the exact PR's CI gates.
 
-Remaining product work includes explicit step navigation/history and guided
-entry cards, voice input, broader administrative audit presentation, actual-model
+The design follow-up replaces repeated opening questions and empty management
+panels with one purpose composer and three editable transfer-question starters.
+The same linked Task stays above optional conversation history; completed
+answers precede receipts, while review and recovery actions follow their current
+status. [DESIGN.md](DESIGN.md) records the source-based acceptance criteria and
+[VERIFICATION.md](VERIFICATION.md) distinguishes actual browser readback from
+scripted financial display states.
+
+Remaining product work includes explicit step URLs/browser history, voice
+input, broader administrative audit presentation, actual-model
 quality acceptance, model-bridge preflight/outage UX, approved public-demo
 acceptance and separately approved wallet/funded Devnet completion. None is
 closed by the above test counts.
