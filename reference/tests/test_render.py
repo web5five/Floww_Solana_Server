@@ -14,6 +14,7 @@ from ai_baseline import fixtures
 from ai_baseline.analytics import consume_analytics
 from ai_baseline.analytics_demo import FIXTURE, request
 from ai_baseline.render import render_html, render_markdown
+from ai_baseline.presentation import OutputOptions, present_answer
 from ai_baseline.report_demo import demo_answer, main
 from ai_baseline.workflow import ProtectedResource, Result
 
@@ -185,6 +186,76 @@ class ReportOutputTests(unittest.TestCase):
     def test_same_answer_renders_identically(self):
         for render in (render_markdown, render_html):
             self.assertEqual(render(self.answer), render(self.answer))
+
+    def test_korean_render_keeps_every_exact_total_and_evidence_with_localized_labels(self):
+        answer = present_answer(self.answer, OutputOptions("ko", "incoming"))
+        for render in (render_markdown, render_html):
+            output = render(answer, language="ko")
+            for total in self.answer.totals:
+                for value in (total.asset_ref, total.direction, total.amount_base_units, total.amount_display):
+                    self.assertIn(value, output)
+                for ref in total.evidence_refs:
+                    self.assertGreaterEqual(output.count(ref), 2)
+            self.assertIn("자산·방향별 금액", output)
+            self.assertIn("최소 단위 금액", output)
+            self.assertIn("서로 다른 자산의 금액을 합산하지 않습니다", output)
+            self.assertIn("지갑 잔액이나 수익을 나타내지 않습니다", output)
+        self.assertIn('<html lang="ko">', render_html(answer, language="ko"))
+
+    def test_korean_empty_partial_warning_precedes_summary_even_without_limitation_prose(self):
+        answer = replace(demo_answer("empty-partial"), limitations=(), answer_text="반환된 전송: 0건")
+        for render in (render_markdown, render_html):
+            output = render(answer, language="ko")
+            self.assertLess(output.index("일부 범위만 조회"), output.index("요약"))
+            self.assertIn("활동이 없었다고 판단할 수 없습니다", output)
+
+    def test_korean_hostile_purpose_asset_and_labels_remain_inert(self):
+        hostile = '```\n# Heading\n```\n<script>alert(1)</script><img src=x onerror=x> [x](javascript:x) `x`'
+        total = replace(self.answer.totals[0], asset_ref=hostile, direction=hostile)
+        answer = replace(self.answer, totals=(total,), source_refs=(hostile,), limitations=(hostile,))
+        answer = present_answer(answer, OutputOptions("ko"), purpose=hostile)
+        html = render_html(answer, language="ko")
+        parsed = ParsedHtml(html)
+        self.assertTrue({"script", "img", "a"}.isdisjoint(parsed.tags))
+        self.assertIn(hostile, "".join(parsed.text))
+        markdown = render_markdown(answer, language="ko")
+        self.assertIn("````text\n" + answer.answer_text + "\n````", markdown)
+        # Line breaks in labels remain within one inline-code label.
+        self.assertIn(hostile.replace("\n", r"\n"), markdown)
+
+    def test_default_language_remains_english_and_invalid_language_cannot_enter_attributes(self):
+        for render in (render_markdown, render_html):
+            self.assertEqual(render(self.answer), render(self.answer, language="en"))
+            with self.assertRaises(ValueError):
+                render(self.answer, language='ko" onload="alert(1)')
+
+    def test_summary_precedes_collapsed_scope_details_and_all_metadata_remains_accessible(self):
+        for language, title in (("en", "Report scope and details"), ("ko", "조회 범위와 보고서 정보")):
+            answer = present_answer(self.answer, OutputOptions(language))
+            output = render_html(answer, language=language)
+            self.assertLess(output.index("<pre>"), output.index('<details class="metadata">'))
+            self.assertIn('<details class="metadata"><summary>' + title + "</summary><dl>", output)
+            self.assertNotIn("<details open", output)
+            parsed = ParsedHtml(output)
+            self.assertIn("details", parsed.tags)
+            self.assertIn("summary", parsed.tags)
+            self.assertFalse(any(name == "open" for name, _ in parsed.attributes))
+            details = output.split('<details class="metadata">', 1)[1].split("</details>", 1)[0]
+            for value in (answer.wallet, answer.data_network, answer.payment_network, answer.window_start,
+                          answer.window_end, answer.data_as_of, answer.generated_at, answer.generator_version):
+                self.assertIn(value, details)
+            markdown = render_markdown(answer, language=language)
+            self.assertLess(markdown.index("```text"), markdown.index("## " + title))
+
+    def test_partial_and_synthetic_notices_stay_visible_before_summary_and_details(self):
+        for language, synthetic, partial in (("en", "Synthetic data.", "Partial coverage"),
+                                             ("ko", "합성 데이터입니다.", "일부 범위만 조회")):
+            answer = present_answer(demo_answer("partial"), OutputOptions(language))
+            for render in (render_markdown, render_html):
+                output = render(answer, language=language)
+                summary_start = output.index("<pre>" if render == render_html else "```text")
+                self.assertLess(output.index(synthetic), summary_start)
+                self.assertLess(output.index(partial), summary_start)
 
     def test_raw_reports_failure_results_and_missing_answers_are_rejected(self):
         for value in ({"wallet": "raw"}, Result("STOPPED", "POLICY_DENIED"), None, "raw body"):

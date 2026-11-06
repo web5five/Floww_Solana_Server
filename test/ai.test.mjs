@@ -47,6 +47,58 @@ test('real Python subprocess validates delivered report and renders safe HTML/Ma
   assert.match(result.markdown, /Partial coverage/);
   assert.equal(result.body, undefined);
 });
+test('real Python subprocess presents Korean purpose and focused prose without changing exact report facts', async () => {
+  const bridge = createAiBridge(), input = snapshot();
+  input.context.purpose = '입금만 한국어로 요약해줘';
+  const proposal = await bridge.propose(input);
+  assert.equal(proposal.status, 'PROPOSED');
+  const raw = { ...input, proposalRef: proposal.proposal_ref, attemptRef: 'attempt-one', settlementRef: 'settlement-one',
+    deliveryRef: 'delivery-one', policy: 'ALLOW', payment: 'CONFIRMED', fulfillment: 'COMPLETED' };
+  const body = JSON.parse(bodyFor(input));
+  body.transfers = [
+    { record_id: 'incoming', source_ref: body.source_refs[0], transaction_ref: 'tx-one', event_index: 0,
+      timestamp: new Date(Date.parse(input.request.window_start) + 1_000).toISOString(), asset_ref: 'mint-one',
+      decimals: 6, amount_base_units: '9007199254740993123456789', from_wallet: 'counterparty', to_wallet: input.request.wallet },
+    { record_id: 'outgoing', source_ref: body.source_refs[0], transaction_ref: 'tx-two', event_index: 0,
+      timestamp: new Date(Date.parse(input.request.window_start) + 2_000).toISOString(), asset_ref: 'mint-two',
+      decimals: 0, amount_base_units: '7', from_wallet: input.request.wallet, to_wallet: 'counterparty' },
+  ];
+  raw.body = JSON.stringify(body);
+  const result = await bridge.consume(raw);
+  assert.equal(result.status, 'EVIDENCE_READY');
+  assert.equal(result.answer.transfer_count, 2);
+  assert.equal(result.answer.complete, false);
+  assert.equal(result.answer.totals.length, 2);
+  assert.equal(result.answer.totals[0].amount_base_units, '9007199254740993123456789');
+  assert.equal(result.answer.totals[0].amount_display, '9007199254740993123.456789');
+  assert.match(result.answer.answer_text, /입금 \(in\): 1건, 9007199254740993123\.456789 단위/);
+  assert.doesNotMatch(result.answer.answer_text, /출금 \(out\)/);
+  assert.deepEqual(result.answer.evidence_refs, ['delivery-one', 'delivery-one#transfer-incoming', 'delivery-one#transfer-outgoing']);
+  for (const output of [result.markdown, result.html]) {
+    assert.ok(output.includes('9007199254740993123.456789'));
+    assert.ok(output.includes('mint-two'));
+    assert.ok(output.includes('delivery-one#transfer-outgoing'));
+  }
+  assert.match(result.html, /<html lang="ko">/);
+  assert.match(result.markdown, /# 지갑 전송 보고서/);
+});
+test('real Python subprocess honors English cue and escapes Korean purpose markup in every output', async () => {
+  const bridge = createAiBridge(), input = snapshot();
+  const purpose = '건수만 in English\n```\n# injected\n```\n<script>alert(1)</script> [x](javascript:x)';
+  input.context.purpose = purpose;
+  const proposal = await bridge.propose(input);
+  const result = await bridge.consume({ ...input, proposalRef: proposal.proposal_ref, attemptRef: 'attempt-one',
+    settlementRef: 'settlement-one', deliveryRef: 'delivery-one', policy: 'ALLOW', payment: 'CONFIRMED',
+    fulfillment: 'COMPLETED', body: bodyFor(input) });
+  assert.equal(result.status, 'EVIDENCE_READY');
+  assert.match(result.answer.answer_text, /Returned transfers: 0/);
+  assert.match(result.answer.answer_text, /incomplete coverage cannot establish no activity/);
+  assert.ok(result.answer.answer_text.includes(purpose));
+  assert.match(result.html, /<html lang="en">/);
+  assert.doesNotMatch(result.html, /<script>/);
+  assert.match(result.html, /&lt;script&gt;/);
+  assert.ok(result.markdown.includes('````text\n' + result.answer.answer_text + '\n````'));
+});
 test('missing authorization and payment states cannot default to success', async () => {
   const bridge = createAiBridge(), input = await approved(bridge);
   for (const field of ['policy', 'payment', 'fulfillment']) {

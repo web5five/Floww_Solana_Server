@@ -6,7 +6,7 @@ returns. This adapter cannot turn caller assertions into on-chain proof.
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -14,6 +14,7 @@ import sys
 
 from .analytics import AnalyticsProposal, AnalyticsRequest, consume_analytics, propose_analytics
 from .model_api import OpenAIResponsesModel
+from .presentation import infer_output_options, present_answer
 from .render import render_html, render_markdown
 from .workflow import BackendOutcome, Candidate, Context, ProtectedResource, _json, _ref, _text
 
@@ -59,7 +60,7 @@ def _request(raw: object) -> AnalyticsRequest:
         "data_network", "window_start", "window_end"), ("window_start", "window_end"))
 
 
-def _result(value, execution_kind: str) -> dict:
+def _result(value, execution_kind: str, *, language: str = "en") -> dict:
     result = {"status": value.status, "code": value.code, "execution_kind": execution_kind}
     if value.question is not None:
         result["question"] = value.question
@@ -67,7 +68,8 @@ def _result(value, execution_kind: str) -> dict:
         result.update(proposal_ref=value.proposal.proposal_ref, explanation=value.proposal.explanation)
     answer = getattr(value, "answer", None)
     if answer is not None:
-        result.update(answer=asdict(answer), html=render_html(answer), markdown=render_markdown(answer))
+        result.update(answer=asdict(answer), html=render_html(answer, language=language),
+                      markdown=render_markdown(answer, language=language))
     return result
 
 
@@ -111,7 +113,10 @@ def handle(operation: str, raw: object, *, clock=None) -> dict:
     value = consume_analytics(proposal, outcome, request,
         lambda ref: ProtectedResource(ref, raw.get("mediaType", "application/json"), body),
         lambda: current, max_report_age=timedelta(seconds=age), clock=clock)
-    return _result(value, "validated_transfer_summary")
+    options = infer_output_options(context.purpose)
+    if getattr(value, "answer", None) is not None:
+        value = replace(value, answer=present_answer(value.answer, options, purpose=context.purpose))
+    return _result(value, "validated_transfer_summary", language=options.language)
 
 
 def main() -> None:

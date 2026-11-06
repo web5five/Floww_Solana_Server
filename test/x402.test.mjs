@@ -11,11 +11,19 @@ import {
 import { decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentSignatureHeader } from '@x402/core/http';
 import { TOKEN_PROGRAM_ADDRESS } from '@x402/svm';
 import { createGateway, mountMerchant, DEVNET } from '../service/x402.mjs';
+import { createApp } from '../service/app.mjs';
+import { createLifecycle, createShutdown } from '../service/lifecycle.mjs';
 const DEVNET_GENESIS = 'EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG';
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
   return { promise, resolve };
+}
+
+async function until(check) {
+  const deadline = Date.now() + 2000;
+  while (!check() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 1));
+  assert.ok(check(), 'controlled merchant boundary was not reached');
 }
 
 function key() {
@@ -32,16 +40,18 @@ async function listen(app, t) {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   });
-  return `http://127.0.0.1:${server.address().port}`;
+  return { origin: `http://127.0.0.1:${server.address().port}`, server };
 }
 
 async function environment(t, opts = {}) {
   const payer = key(), feePayer = key(), merchant = key(), mint = key(), blockhash = key();
   const feeSigner = await createKeyPairSignerFromBytes(feePayer.bytes);
   const chain = new Map();
-  const counts = { settle: 0, verify: 0, reports: 0, rpc: [] };
+  const counts = { settle: 0, verify: 0, reports: 0, claims: 0, receiptReads: 0, receiptWrites: 0, rpc: [] };
   const reportEntered = deferred(), reportAborted = deferred(), settleEntered = deferred(), settlementCompleted = deferred();
   const claimEntered = deferred(), pendingPutEntered = deferred();
+  const settledPutEntered = deferred(), settledPutCompleted = deferred(), storeClosed = deferred();
+  const storeState = { closed: false, closes: 0 };
   const mintBytes = Buffer.alloc(82);
   mintBytes.writeBigUInt64LE(10_000_000_000n, 36);
   mintBytes[44] = 6;
@@ -72,7 +82,7 @@ async function environment(t, opts = {}) {
     }
     res.json({ jsonrpc: '2.0', id: req.body.id, result: await rpc(req.body.method, req.body.params) });
   });
-  const rpcOrigin = await listen(rpcApp, t);
+  const { origin: rpcOrigin } = await listen(rpcApp, t);
   const facilitator = {
     async getSupported() { return { kinds: [{ x402Version: 2, scheme: 'exact', network: DEVNET,
       extra: { feePayer: feePayer.address, transactionVersions: [0] } }], extensions: [], signers: { 'solana:*': [feePayer.address] } }; },
@@ -102,44 +112,60 @@ async function environment(t, opts = {}) {
     res.json(await facilitator.settle(req.body.paymentPayload, req.body.paymentRequirements));
   });
   const app = express();
-  const origin = await listen(app, t);
+  const { origin, server } = await listen(app, t);
   const config = { network: DEVNET, rpcUrl: rpcOrigin, facilitatorUrl: `${rpcOrigin}/facilitator`,
-    merchantOrigin: origin, merchantPayTo: merchant.address, asset: mint.address,
+    origin, merchantOrigin: origin, merchantPayTo: merchant.address, asset: mint.address,
     assetDecimals: 6, amountAtomic: '1000', paymentEnabled: true,
-    payerPrivateKey: payer.bytes.toString('base64'), requestTimeoutMs: 2000 };
+    payerPrivateKey: payer.bytes.toString('base64'), requestTimeoutMs: 2000,
+    maxConcurrentOperations: opts.merchantLimit ?? 4 };
   const records = new Map();
   const receiptStore = {
-    get(key) { return records.get(key); },
+    get(key) { assert.equal(storeState.closed, false); counts.receiptReads++; return records.get(key); },
     async put(key, value) {
+      assert.equal(storeState.closed, false); counts.receiptWrites++;
       if (opts.pendingPutGate && value.status === 'PENDING') {
         pendingPutEntered.resolve();
         await opts.pendingPutGate.promise;
       }
+      if (value.status === 'SETTLED') {
+        settledPutEntered.resolve();
+        if (opts.settledPutGate) await opts.settledPutGate.promise;
+      }
+      assert.equal(storeState.closed, false, 'receipt persistence must retain its store after HTTP close');
       records.set(key, structuredClone(value));
+      if (value.status === 'SETTLED') settledPutCompleted.resolve();
     },
     async claim(key) {
+      assert.equal(storeState.closed, false); counts.claims++;
       if (opts.claimGate) { claimEntered.resolve(); await opts.claimGate.promise; }
+      assert.equal(storeState.closed, false, 'an unfinished claim must retain its store after HTTP close');
       if (records.has(key)) return false;
       records.set(key, { status: 'PENDING' }); return true;
     },
   };
-  mountMerchant(app, { config, rpc, facilitator: opts.httpFacilitator ? undefined : facilitator, receiptStore, reportProvider: async ({ resourceRef, wallet, signal }) => {
+  const reportProvider = async ({ resourceRef, wallet, signal }) => {
     counts.reports++;
     if (opts.claimGate || opts.pendingPutGate) signal.addEventListener('abort', () => reportAborted.resolve(), { once: true });
     if (opts.reportGate) {
       signal.addEventListener('abort', () => reportAborted.resolve(), { once: true });
-      reportEntered.resolve();
+      if (counts.reports >= (opts.reportTarget ?? 1)) reportEntered.resolve();
       // Deliberately ignore cancellation until released, to prove the merchant
       // cannot start settlement when a late report eventually completes.
       await opts.reportGate.promise;
     }
     if (opts.providerFailure) throw new Error('Scripted provider unavailable');
     return { schema_version: 'analytics-reference/v1', resource_ref: resourceRef, wallet, transfers: [] };
-  } });
-  const url = `${origin}/merchant/reports/purchase-1?wallet=${payer.address}&start=2026-11-01T00%3A00%3A00.000Z&end=2026-11-02T00%3A00%3A00.000Z`;
+  };
   const gateway = createGateway(config, { rpc });
-  return { app, config, url, gateway, counts, chain, records, payer, rpc,
+  const lifecycle = opts.lifecycle ? createLifecycle({ probe: async () => ({ databaseReady: true, ledgerReady: true }) }) : undefined;
+  const mount = (target, context) => mountMerchant(target, { ...context, rpc, facilitator: opts.httpFacilitator ? undefined : facilitator });
+  if (lifecycle) app.use(createApp({ config, store: { clock: Date.now, receipts: receiptStore }, gateway, reportProvider, lifecycle, mountMerchant: mount }));
+  else mount(app, { config, receiptStore, reportProvider });
+  const store = { close() { storeState.closed = true; storeState.closes++; storeClosed.resolve(); } };
+  const url = `${origin}/merchant/reports/purchase-1?wallet=${payer.address}&start=2026-11-01T00%3A00%3A00.000Z&end=2026-11-02T00%3A00%3A00.000Z`;
+  return { app, server, config, url, gateway, counts, chain, records, payer, rpc, lifecycle, store, storeState, storeClosed,
     reportEntered, reportAborted, settleEntered, settlementCompleted, claimEntered, pendingPutEntered,
+    settledPutEntered, settledPutCompleted,
     setGenesis(value) { genesis = value; }, setDecimals(value) { decimals = value; } };
 }
 
@@ -164,6 +190,104 @@ test('real SDK 402 -> partial signing -> scripted settlement -> bound resource a
   assert.equal(recovered.payment, 'CONFIRMED');
   assert.equal(recovered.body, result.body);
   assert.equal(e.counts.settle, 1);
+});
+
+test('equivalent concurrent proof is rejected before duplicate facilitator or report work, then cached recovery succeeds', async (t) => {
+  const gate = deferred(), e = await environment(t, { reportGate: gate });
+  const quote = await e.gateway.quote(e.url);
+  const signed = await e.gateway.sign(quote, { beforeSign: async () => {} });
+  const first = fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+  await e.reportEntered.promise;
+  const payload = decodePaymentSignatureHeader(signed.paymentHeader);
+  const encoded = encodePaymentSignatureHeader(Object.fromEntries(Object.entries(payload).reverse()));
+  assert.notEqual(encoded, signed.paymentHeader, 'different JSON encoding still contains the identical signed message');
+  const duplicate = await fetch(e.url, { headers: { 'payment-signature': encoded } });
+  assert.equal(duplicate.status, 429);
+  assert.equal(duplicate.headers.get('retry-after'), '1');
+  assert.deepEqual(await duplicate.json(), { reasonCode: 'MERCHANT_BUSY' });
+  assert.equal(e.counts.verify, 1); assert.equal(e.counts.reports, 1); assert.equal(e.counts.settle, 0);
+  gate.resolve();
+  const completed = await first;
+  assert.equal(completed.status, 200);
+  const body = await completed.text();
+  const replay = await fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+  assert.equal(replay.status, 200); assert.equal(await replay.text(), body);
+  assert.equal(e.counts.verify, 1); assert.equal(e.counts.reports, 1); assert.equal(e.counts.settle, 1);
+});
+
+test('merchant global admission bounds distinct proofs and resumes after active responses complete', async (t) => {
+  const gate = deferred(), e = await environment(t, { reportGate: gate, reportTarget: 2, merchantLimit: 2 });
+  const payments = [];
+  for (let index = 1; index <= 3; index++) {
+    const url = e.url.replace('purchase-1', 'purchase-' + index);
+    const quote = await e.gateway.quote(url);
+    payments.push({ url, signed: await e.gateway.sign(quote, { beforeSign: async () => {} }) });
+  }
+  const pending = payments.slice(0, 2).map(({ url, signed }) => fetch(url, { headers: { 'payment-signature': signed.paymentHeader } }));
+  await e.reportEntered.promise;
+  const { url, signed } = payments[2];
+  const rejected = await Promise.all(Array.from({ length: 12 }, () => fetch(url, { headers: { 'payment-signature': signed.paymentHeader } })));
+  for (const response of rejected) {
+    assert.equal(response.status, 429); assert.equal(response.headers.get('retry-after'), '1');
+    assert.deepEqual(await response.json(), { reasonCode: 'MERCHANT_BUSY' });
+  }
+  assert.equal(e.counts.verify, 2); assert.equal(e.counts.reports, 2); assert.equal(e.counts.settle, 0);
+  gate.resolve();
+  for (const response of await Promise.all(pending)) { assert.equal(response.status, 200); await response.text(); }
+  const accepted = await fetch(url, { headers: { 'payment-signature': signed.paymentHeader } });
+  assert.equal(accepted.status, 200); await accepted.text();
+  assert.equal(e.counts.verify, 3); assert.equal(e.counts.reports, 3); assert.equal(e.counts.settle, 3);
+});
+
+test('malformed proof and provider failure release temporary admission without poisoning durable proof ownership', async (t) => {
+  const options = { providerFailure: true, merchantLimit: 1 }, e = await environment(t, options);
+  const malformed = await fetch(e.url, { headers: { 'payment-signature': 'invalid-proof' } });
+  assert.equal(malformed.status, 400); assert.deepEqual(await malformed.json(), { reasonCode: 'INVALID_PAYMENT_PROOF' });
+  assert.equal(e.counts.verify, 0); assert.equal(e.records.size, 0);
+  const quote = await e.gateway.quote(e.url);
+  const signed = await e.gateway.sign(quote, { beforeSign: async () => {} });
+  const failed = await fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+  assert.equal(failed.status, 503); await failed.json();
+  assert.equal(e.records.size, 0); assert.equal(e.counts.settle, 0);
+  options.providerFailure = false;
+  const retried = await fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+  assert.equal(retried.status, 200); await retried.text();
+  assert.equal(e.counts.verify, 2); assert.equal(e.counts.reports, 2); assert.equal(e.counts.settle, 1);
+});
+
+test('rejected facilitator verification cannot poison a durable proof claim or start report work', async (t) => {
+  const options = { verify: false, httpFacilitator: true }, e = await environment(t, options);
+  const quote = await e.gateway.quote(e.url);
+  let signs = 0;
+  const signed = await e.gateway.sign(quote, { beforeSign: async () => { signs++; } });
+  const rejected = await fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+  assert.equal(rejected.status, 402); assert.deepEqual(await rejected.json(), { reasonCode: 'PAYMENT_REJECTED' });
+  assert.equal(e.records.size, 0); assert.equal(e.counts.claims, 0); assert.equal(e.counts.receiptWrites, 0);
+  assert.equal(e.counts.reports, 0); assert.equal(e.counts.settle, 0);
+  options.verify = true;
+  const retried = await fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+  assert.equal(retried.status, 200); await retried.text();
+  assert.equal(signs, 1); assert.equal(e.counts.verify, 2); assert.equal(e.counts.reports, 1);
+  assert.equal(e.counts.claims, 1); assert.equal(e.counts.settle, 1);
+});
+
+test('drain rejects actual SDK merchant GET and HEAD requests before verification, receipt reads or provider work', async (t) => {
+  const e = await environment(t, { lifecycle: true });
+  const quote = await e.gateway.quote(e.url);
+  const signed = await e.gateway.sign(quote, { beforeSign: async () => {} });
+  const rpcCalls = e.counts.rpc.length, receiptReads = e.counts.receiptReads;
+  e.lifecycle.beginDrain();
+  for (const [url, method, header] of [[e.url, 'GET'], [e.url, 'GET', signed.paymentHeader],
+    [e.url.replace('/merchant/', '/MeRcHaNt/'), 'GET', signed.paymentHeader], [e.url, 'HEAD', signed.paymentHeader]]) {
+    const denied = await fetch(url, { method, headers: header ? { 'payment-signature': header } : {} });
+    assert.equal(denied.status, 503); assert.equal(denied.headers.get('retry-after'), '1');
+    if (method !== 'HEAD') assert.equal((await denied.json()).error.code, 'SERVICE_DRAINING');
+    else assert.equal(await denied.text(), '');
+  }
+  assert.equal(e.counts.verify, 0); assert.equal(e.counts.reports, 0); assert.equal(e.counts.settle, 0);
+  assert.equal(e.counts.claims, 0); assert.equal(e.counts.receiptWrites, 0); assert.equal(e.records.size, 0);
+  assert.equal(e.counts.rpc.length, rpcCalls); assert.equal(e.counts.receiptReads, receiptReads);
+  assert.deepEqual(e.lifecycle.counts(), { requests: 0, work: 0 });
 });
 
 test('readiness exposes configured public payer while payment opt-in remains disabled', async (t) => {
@@ -278,7 +402,7 @@ test('quote redirects are not followed', async (t) => {
   let called = 0;
   const server = express();
   server.get('/merchant/reports/:id', (req, res) => { called++; res.redirect('https://example.com/'); });
-  const origin = await listen(server, t);
+  const { origin } = await listen(server, t);
   const gateway = createGateway({ ...e.config, merchantOrigin: origin });
   await assert.rejects(gateway.quote(e.url.replace(e.config.merchantOrigin, origin)), { code: 'QUOTE_UNAVAILABLE' });
   assert.equal(called, 1);
@@ -402,6 +526,28 @@ test('client disconnect cancels report work before any settlement claim or payme
   assert.equal(e.counts.settle, 0);
 });
 
+test('an abort-ignoring provider retains its admission and work lease until it stops, then original proof retry succeeds', async (t) => {
+  const gate = deferred(), e = await environment(t, { lifecycle: true, reportGate: gate, merchantLimit: 1 });
+  const quote = await e.gateway.quote(e.url);
+  let signs = 0;
+  const signed = await e.gateway.sign(quote, { beforeSign: async () => { signs++; } });
+  const controller = new AbortController();
+  const pending = fetch(e.url, { signal: controller.signal, headers: { 'payment-signature': signed.paymentHeader } });
+  try {
+    await e.reportEntered.promise;
+    controller.abort(); await assert.rejects(pending); await e.reportAborted.promise;
+    await until(() => e.lifecycle.counts().requests === 0);
+    assert.equal(e.lifecycle.counts().work, 1); assert.equal(e.records.size, 0); assert.equal(e.counts.settle, 0);
+    const busy = await fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+    assert.equal(busy.status, 429); assert.deepEqual(await busy.json(), { reasonCode: 'MERCHANT_BUSY' });
+    assert.equal(e.counts.verify, 1); assert.equal(e.counts.reports, 1); assert.equal(e.counts.claims, 0);
+    gate.resolve(); await until(() => e.lifecycle.counts().work === 0);
+    const retried = await fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } });
+    assert.equal(retried.status, 200); await retried.text();
+    assert.equal(signs, 1); assert.equal(e.counts.verify, 2); assert.equal(e.counts.reports, 2); assert.equal(e.counts.settle, 1);
+  } finally { controller.abort(); gate.resolve(); await pending.catch(() => {}); }
+});
+
 test('merchant total request deadline cancels report and prevents a late settlement', async (t) => {
   const gate = deferred(), e = await environment(t, { reportGate: gate });
   const quote = await e.gateway.quote(e.url);
@@ -418,7 +564,7 @@ test('merchant total request deadline cancels report and prevents a late settlem
 });
 
 test('disconnect after settlement starts preserves durable outcome for identical proof recovery', async (t) => {
-  const gate = deferred(), e = await environment(t, { settlementGate: gate });
+  const gate = deferred(), e = await environment(t, { lifecycle: true, settlementGate: gate });
   const quote = await e.gateway.quote(e.url);
   const signed = await e.gateway.sign(quote, { beforeSign: async () => {} });
   const controller = new AbortController();
@@ -427,16 +573,60 @@ test('disconnect after settlement starts preserves durable outcome for identical
   assert.equal(e.records.size, 1);
   controller.abort();
   await assert.rejects(pending);
+  await until(() => e.lifecycle.counts().requests === 0);
+  assert.equal(e.lifecycle.counts().work, 1);
   gate.resolve();
   await e.settlementCompleted.promise;
-  // Let the handler persist the settlement observation after the chain reply.
-  await new Promise(resolve => setImmediate(resolve));
+  await until(() => e.lifecycle.counts().work === 0);
   const recovered = await e.gateway.redeem(e.url, signed, quote);
   assert.equal(recovered.payment, 'CONFIRMED');
   assert.equal(recovered.delivery, 'COMPLETED');
   assert.equal(e.counts.settle, 1);
   assert.equal([...e.records.values()][0].status, 'SETTLED');
 });
+
+test('forced HTTP shutdown preserves the store until actual SDK settlement receipt persistence finishes', async (t) => {
+  const gate = deferred(), e = await environment(t, { lifecycle: true, httpFacilitator: true, settledPutGate: gate });
+  const quote = await e.gateway.quote(e.url);
+  const signed = await e.gateway.sign(quote, { beforeSign: async () => {} });
+  const pending = fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } }).catch(error => ({ error }));
+  const close = createShutdown({ server: e.server, store: e.store, lifecycle: e.lifecycle, graceMs: 15 });
+  try {
+    await e.settledPutEntered.promise;
+    assert.equal(e.counts.verify, 1); assert.equal(e.counts.settle, 1);
+    assert.equal([...e.records.values()][0].status, 'PENDING');
+    const result = await close();
+    assert.deepEqual(result, { drained: false, storeClosed: false, forcedHttpClose: true });
+    assert.ok((await pending).error);
+    await until(() => e.lifecycle.counts().requests === 0);
+    assert.equal(e.lifecycle.counts().work, 1); assert.equal(e.storeState.closes, 0);
+    gate.resolve(); await until(() => e.storeState.closes === 1);
+    await e.settledPutCompleted.promise;
+    assert.equal([...e.records.values()][0].status, 'SETTLED');
+    assert.equal(e.counts.settle, 1); assert.deepEqual(e.lifecycle.counts(), { requests: 0, work: 0 });
+    assert.strictEqual(await close(), result); assert.equal(e.storeState.closes, 1);
+  } finally { gate.resolve(); await close(); await pending; }
+});
+
+for (const boundary of ['claim', 'pendingPut']) {
+  test(`forced HTTP shutdown during an async ${boundary} preserves its claim without starting settlement`, async (t) => {
+    const gate = deferred(), e = await environment(t, { lifecycle: true, [boundary + 'Gate']: gate });
+    const quote = await e.gateway.quote(e.url);
+    const signed = await e.gateway.sign(quote, { beforeSign: async () => {} });
+    const pending = fetch(e.url, { headers: { 'payment-signature': signed.paymentHeader } }).catch(error => ({ error }));
+    const close = createShutdown({ server: e.server, store: e.store, lifecycle: e.lifecycle, graceMs: 15 });
+    try {
+      await e[boundary + 'Entered'].promise;
+      assert.deepEqual(await close(), { drained: false, storeClosed: false, forcedHttpClose: true });
+      assert.ok((await pending).error); await e.reportAborted.promise;
+      assert.equal(e.storeState.closes, 0); assert.equal(e.lifecycle.counts().work, 1);
+      gate.resolve(); await until(() => e.storeState.closes === 1);
+      assert.equal(e.counts.settle, 0); assert.equal(e.counts.claims, 1);
+      assert.equal(e.records.size, 1); assert.equal([...e.records.values()][0].status, 'PENDING');
+      assert.deepEqual(e.lifecycle.counts(), { requests: 0, work: 0 });
+    } finally { gate.resolve(); await close(); await pending; }
+  });
+}
 
 test('disconnect during async receipt claim cannot start settlement after the claim resolves', async (t) => {
   const gate = deferred(), e = await environment(t, { claimGate: gate });

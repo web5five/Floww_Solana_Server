@@ -34,6 +34,8 @@ real loopback HTTP/process/DB behavior; they do not prove external settlement.
 Actual model calls, wallet acceptance and cloud deployment remain distinct.
 
 See the [purpose-first experience](docs/production/EXPERIENCE.md),
+[hackathon quality gates](docs/production/READINESS.md),
+[earlier/current comparison](docs/production/COMPARISON.md),
 [workspace guide](docs/production/WORKSPACE.md),
 [planner roles](docs/production/PLANNER.md), [budget ledger](docs/production/MANDATES.md),
 [API contract](docs/integration/API.md), [payment transport](docs/integration/X402.md),

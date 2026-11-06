@@ -4,6 +4,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from ai_baseline.integration_cli import handle
+from ai_baseline.render import render_html, render_markdown
+from ai_baseline.analytics import AnalyticsAnswer, AssetTotal
 
 
 class IntegrationCliTests(unittest.TestCase):
@@ -57,6 +59,49 @@ class IntegrationCliTests(unittest.TestCase):
         self.assertFalse(result["answer"]["is_synthetic"])
         self.assertIn("Partial coverage", result["markdown"])
         self.assertIn("<!doctype html>", result["html"])
+
+    def test_korean_request_uses_one_presented_answer_in_json_html_and_markdown(self):
+        self.payload["context"]["purpose"] = "최근 전송 건수만 알려줘"
+        result = handle("consume", self.consumed(), clock=self.clock)
+        self.assertEqual(result["status"], "EVIDENCE_READY")
+        self.assertIn("입금: 0건", result["answer"]["answer_text"])
+        self.assertIn("활동이 없었다고 판단할 수 없습니다", result["answer"]["answer_text"])
+        self.assertIn('<html lang="ko">', result["html"])
+        self.assertIn("# 지갑 전송 보고서", result["markdown"])
+        answer = AnalyticsAnswer(**{**result["answer"], "totals": tuple(
+            AssetTotal(**total) for total in result["answer"]["totals"])})
+        self.assertEqual(result["html"], render_html(answer, language="ko"))
+        self.assertEqual(result["markdown"], render_markdown(answer, language="ko"))
+
+    def test_explicit_english_on_korean_request_does_not_change_scope_or_evidence(self):
+        self.payload["context"]["purpose"] = "지갑 전송을 영어로 요약해줘"
+        raw = self.consumed()
+        result = handle("consume", raw, clock=self.clock)
+        self.assertIn("Returned transfers: 0", result["answer"]["answer_text"])
+        self.assertIn('<html lang="en">', result["html"])
+        self.assertEqual(result["answer"]["evidence_refs"], ("delivery-1",))
+        self.assertEqual(result["answer"]["source_refs"], ("solana:devnet:rpc",))
+        self.assertEqual(result["answer"]["window_start"], raw["request"]["window_start"])
+        self.assertEqual(result["answer"]["window_end"], raw["request"]["window_end"])
+
+    def test_purpose_with_markup_is_inert_after_consumption(self):
+        purpose = '한국어로 요약\n```\n# heading\n```\n<script>alert("x")</script> [x](javascript:x)'
+        self.payload["context"]["purpose"] = purpose
+        result = handle("consume", self.consumed(), clock=self.clock)
+        self.assertEqual(result["status"], "EVIDENCE_READY")
+        self.assertIn(purpose, result["answer"]["answer_text"])
+        self.assertNotIn("<script>", result["html"])
+        self.assertIn("&lt;script&gt;", result["html"])
+        self.assertIn("````text\n" + result["answer"]["answer_text"] + "\n````", result["markdown"])
+
+    def test_korean_request_cannot_bypass_invalid_report_or_payment_gate(self):
+        self.payload["context"]["purpose"] = "입금만 한국어로 보여줘"
+        raw = self.consumed()
+        raw.update(payment="UNKNOWN", body="unparseable")
+        result = handle("consume", raw, clock=self.clock)
+        self.assertEqual(result["code"], "PAYMENT_RECONCILIATION_REQUIRED")
+        self.assertNotIn("answer", result)
+        self.assertNotIn("html", result)
 
     def test_authority_states_default_closed(self):
         for field in ("policy", "payment", "fulfillment"):

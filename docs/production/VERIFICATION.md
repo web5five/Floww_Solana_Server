@@ -62,6 +62,48 @@ See [EXPERIENCE.md](EXPERIENCE.md) for the product sources, interpretation and
 preserved approval boundaries. Local screenshots and sanitized API readbacks
 are outside this repo; live funded settlement is not part of these results.
 
+## Hackathon-quality follow-up
+
+The user clarified that production-level quality is the standard for a
+hackathon entry. The [comparison](COMPARISON.md) and [quality ledger](READINESS.md)
+record that scope and the exact earlier/current evidence boundaries.
+
+- Final local Node suite: **289 passed, zero failed/skipped**, with required
+  isolated PostgreSQL checks enabled. Python: **206 passed**. Source checks:
+  **62 integration files**, plus `actionlint` and Git whitespace checks.
+- Actual HTTP/SQLite and official-SDK loopback tests exercise ready/unready
+  dependencies, timed-out probes, disconnects, bounded shutdown, delayed
+  authentication/workspace work, final signing admission, original payment
+  facts, and receipt persistence after forced HTTP closure.
+- Merchant admission limits global active work and duplicate proof work per
+  process. Claim/settlement ordering and same-proof recovery remain unchanged.
+  This is not a claim of shared admission across multiple instances.
+- Fixed-label operational records exclude private URLs, headers, bodies,
+  wallets and proofs. Sink/clock failures do not change business outcomes.
+  Destroyed responses are recorded incomplete, even when a delayed close event
+  reports `writableFinished=true`.
+- Unresolved explicit wallet/window corrections cannot silently reuse earlier
+  scope. Presentation honors supported KO/EN and question focus without another
+  model call, preserving every non-prose numeric/evidence/scope field.
+- Result-first Korean/English HTML and Markdown exports were visually checked
+  in the internal browser, including 390px mobile, expandable metadata and empty
+  partial coverage. These render checks use clearly marked **synthetic fixtures**;
+  they do not prove external-model quality, wallet use, settlement or delivery.
+- The actual managed-PostgreSQL loopback preview returned `/livez`200,
+  `/readyz`200 with DB+ledger ready, and private task/conversation401. Legacy
+  capability health remains200 with payments disabled and financial readiness
+  false. A configured model flag is not a live provider availability check.
+
+Independent workers reviewed the merchant/lifecycle/telemetry integration and
+the report/correction changes. Reviewed file hashes and sanitized readbacks
+remain in the local GWDC evidence directory. The exact PR image result must be
+read from CI; these host checks do not substitute for an image build.
+
+A permanently hung handler deliberately retains its DB until its bookkeeping
+finishes. The bounded HTTP-close result reports that incompleteness. No forced
+DB-session termination or automatic release of uncertain `HELD` reservations
+is introduced, and full startup resource-leak hardening is not claimed.
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

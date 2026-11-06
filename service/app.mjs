@@ -6,6 +6,7 @@ import { DEVNET, exact, fail, isAddress, ServiceError } from './config.mjs';
 import { approve, assertApproval, attachQuote, canonical, makeTask, publicTask, resourceUrl,
   signature, termsHash, validateQuote } from './policy.mjs';
 import { digest } from './store.mjs';
+import { createLifecycle } from './lifecycle.mjs';
 
 const safeCode = (value, fallback = 'INTEGRATION_UNAVAILABLE') =>
   typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : fallback;
@@ -24,27 +25,42 @@ function checkSignature(wallet, message, encoded) {
     return verify(null, Buffer.from(message, 'utf8'), key, bytes);
   } catch { return false; }
 }
-export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness }) {
+export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness, lifecycle: suppliedLifecycle, observeRequest }) {
   if (config.network !== DEVNET) fail('DEVNET_ONLY', 500);
   const app = express(), expectedHost = new URL(config.origin).host;
   const now = () => store.clock();
+  const lifecycle = suppliedLifecycle ?? createLifecycle({ probe: async () => {
+    const [databaseReady, ledger] = await Promise.all([
+      Promise.resolve().then(() => store.list('__floww_health__')).then(() => true, () => false),
+      runtimeReadiness ? Promise.resolve().then(runtimeReadiness).catch(() => ({ ready: false })) : { ready: true },
+    ]);
+    return { databaseReady, ledgerReady: ledger?.ready === true, reasonCode: ledger?.reasonCode };
+  } });
+  app.locals.lifecycle = lifecycle;
+  // A disconnected response does not cancel the handler's database work.
+  // Keep all registered API handlers alive through their returned promises.
+  const routes = Object.fromEntries(['get', 'post', 'delete'].map(method => [method, (path, handler) =>
+    app[method](path, (req, res, next) => lifecycle.trackWork(() => handler(req, res, next)))]));
   const globalLimit = config.maxConcurrentOperations ?? 4, ownerLimit = config.maxOwnerConcurrentOperations ?? Math.min(2, globalLimit);
   if (!Number.isInteger(globalLimit) || globalLimit < 1 || globalLimit > 32 ||
       !Number.isInteger(ownerLimit) || ownerLimit < 1 || ownerLimit > globalLimit) fail('INVALID_CONFIGURATION', 500);
   let running = 0;
   const owners = new Map();
   async function withOperation(req, owner, run) {
+    lifecycle.assertAccepting();
     if (running >= globalLimit || (owners.get(owner) ?? 0) >= ownerLimit) {
       const error = new ServiceError('OPERATION_LIMIT_REACHED', 429); error.retryAfter = 1; throw error;
     }
     running++; owners.set(owner, (owners.get(owner) ?? 0) + 1);
-    try { return await run(); }
+    try { return await lifecycle.trackWork(run); }
     finally { running--; const count = owners.get(owner) - 1; if (count) owners.set(owner, count); else owners.delete(owner); }
   }
   const hook = async (name, task, owner) => { if (taskHooks[name]) await taskHooks[name]({ task: structuredClone(task), owner }); };
   app.disable('x-powered-by'); app.disable('etag');
   app.use((req, res, next) => {
     req.requestId = randomUUID(); res.set('X-Request-ID', req.requestId);
+    try { Promise.resolve(observeRequest?.(req, res)).catch(() => {}); }
+    catch { /* Telemetry cannot change request or payment outcomes. */ }
     res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer', 'X-Frame-Options': 'DENY',
       'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
@@ -54,6 +70,10 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
       return next(new ServiceError('ORIGIN_REQUIRED', 403));
     }
     if (req.method === 'OPTIONS') return res.sendStatus(405);
+    lifecycle.trackRequest(req, res);
+    if (!['GET', 'HEAD'].includes(req.method)) {
+      try { lifecycle.assertAccepting(); } catch (error) { error.retryAfter = 1; return next(error); }
+    }
     next();
   });
   app.use('/api', express.json({ limit: '16kb', strict: true, type: 'application/json' }));
@@ -68,9 +88,9 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     if (!session || !Number.isFinite(session.expires) || session.expires <= now()) fail('AUTHENTICATION_REQUIRED', 401);
     return session;
   };
-  const ready = async () => {
+  const ready = async ledgerState => {
     try {
-      const [state, ledger] = await Promise.all([gateway.readiness(), runtimeReadiness ? runtimeReadiness() : { ready: true }]);
+      const [state, ledger] = await Promise.all([gateway.readiness(), ledgerState ?? (runtimeReadiness ? runtimeReadiness() : { ready: true })]);
       return { ready: state?.ready === true && ledger?.ready === true && Boolean(config.merchantPayTo),
         missing: [...(Array.isArray(state?.missing) ? state.missing.filter(x => typeof x === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(x)).map(x => ({
           payment_configuration: 'PAYMENT_CONFIGURATION', payment_enabled: 'FLOWW_ENABLE_DEVNET_PAYMENTS',
@@ -79,32 +99,27 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
         payer: isAddress(state?.payer) ? state.payer : null };
     } catch { return { ready: false, missing: ['PAYMENT_RUNTIME'], payer: null }; }
   };
-  async function databaseReady() {
-    let timer;
-    try {
-      await Promise.race([
-        Promise.resolve().then(() => store.list('__floww_health__')),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error()), 2500); }),
-      ]);
-      return true;
-    } catch { return false; }
-    finally { clearTimeout(timer); }
-  }
-  app.get('/api/health', async (req, res) => {
-    const [state, database] = await Promise.all([ready(), databaseReady()]);
+  routes.get('/livez', (req, res) => res.json({ live: true }));
+  routes.get('/readyz', async (req, res) => {
+    const state = await lifecycle.readiness();
+    res.status(state.ready ? 200 : 503).json(state);
+  });
+  routes.get('/api/health', async (req, res) => {
+    const dependencies = await lifecycle.readiness({ fresh: true }), database = dependencies.databaseReady;
+    const state = await ready({ ready: dependencies.ledgerReady, reasonCode: dependencies.reasonCode });
     res.json({ ready: state.ready && database, network: config.network, mode: 'devnet', databaseReady: database,
       paymentEnabled: config.paymentEnabled, merchantConfigured: Boolean(config.merchantPayTo),
       payer: state.payer, missing: [...new Set([...state.missing, ...(!config.merchantPayTo ? ['MERCHANT_PAY_TO'] : []), ...(!database ? ['DATABASE_CONNECTION'] : [])])],
       modelConfigured: Boolean(config.model && config.apiKey) });
   });
-  app.get('/api/session', async (req, res) => {
+  routes.get('/api/session', async (req, res) => {
     const session = await auth(req); res.json({ wallet: session.wallet, expiresAt: new Date(session.expires).toISOString() });
   });
-  app.post('/api/auth/challenge', async (req, res) => {
+  routes.post('/api/auth/challenge', async (req, res) => {
     exact(req.body, ['wallet']); if (!isAddress(req.body.wallet)) fail('INVALID_WALLET');
     res.json(await store.challenge(req.body.wallet, config.origin));
   });
-  app.post('/api/auth/verify', async (req, res) => {
+  routes.post('/api/auth/verify', async (req, res) => {
     exact(req.body, ['wallet', 'challengeId', 'signature']);
     if (!isAddress(req.body.wallet) || typeof req.body.challengeId !== 'string' || req.body.challengeId.length > 64) fail('INVALID_REQUEST');
     const session = await store.authenticate(req.body.challengeId, req.body.wallet,
@@ -113,11 +128,11 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
       sameSite: 'strict', path: '/', maxAge: config.sessionTtlMs });
     res.json({ wallet: session.wallet, expiresAt: new Date(session.expires).toISOString() });
   });
-  app.post('/api/auth/logout', async (req, res) => {
+  routes.post('/api/auth/logout', async (req, res) => {
     exact(req.body, []); await store.logout(token(req));
     res.clearCookie(config.cookieName, { httpOnly: true, secure: config.secureCookies, sameSite: 'strict', path: '/' }); res.sendStatus(204);
   });
-  app.get('/api/tasks', async (req, res) => {
+  routes.get('/api/tasks', async (req, res) => {
     exact(req.query, ['limit', 'cursor', 'includeArchived']);
     if ((req.query.limit !== undefined && (typeof req.query.limit !== 'string' || !/^[1-9][0-9]?$/.test(req.query.limit))) ||
         (req.query.cursor !== undefined && typeof req.query.cursor !== 'string') ||
@@ -128,22 +143,22 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     });
     await assertSession(req, owner); res.json(page);
   });
-  app.post('/api/tasks', async (req, res) => {
+  routes.post('/api/tasks', async (req, res) => {
     const session = await auth(req), task = makeTask(req.body, session.wallet, now());
     store.event(task, 'TASK_CREATED', 'QUOTE_REQUIRED');
     const saved = await store.add(task, { idempotencyKey: req.get('idempotency-key'), bodyHash: digest(canonical(req.body)) });
     await respondTask(req, res, saved, session.wallet, 201);
   });
-  app.get('/api/tasks/:id', async (req, res) => {
+  routes.get('/api/tasks/:id', async (req, res) => {
     const owner = (await auth(req)).wallet, task = await store.get(req.params.id, owner);
     await respondTask(req, res, task, owner);
   });
-  app.post('/api/tasks/:id/archive', async (req, res) => {
+  routes.post('/api/tasks/:id/archive', async (req, res) => {
     exact(req.body, ['acknowledge']); if (req.body.acknowledge !== true) fail('EXPLICIT_APPROVAL_REQUIRED');
     const owner = (await auth(req)).wallet, task = await store.archive(req.params.id, owner);
     await respondTask(req, res, task, owner);
   });
-  app.post('/api/tasks/:id/restore', async (req, res) => {
+  routes.post('/api/tasks/:id/restore', async (req, res) => {
     exact(req.body, []); const owner = (await auth(req)).wallet, task = await store.restore(req.params.id, owner);
     await respondTask(req, res, task, owner);
   });
@@ -187,7 +202,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     if (task.archivedAt) fail('TASK_ARCHIVED', 409);
     if (task.payment !== 'NOT_STARTED' || task.signedData || task.attemptRef) fail('EXECUTION_ALREADY_CLAIMED', 409);
   }
-  app.post('/api/tasks/:id/quote', async (req, res) => {
+  routes.post('/api/tasks/:id/quote', async (req, res) => {
     exact(req.body, []); const owner = (await auth(req)).wallet, id = req.params.id;
     return withOperation(req, owner, async () => {
       const { task, operation } = await begin(id, owner, 'quote', noExecution);
@@ -212,7 +227,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
       } catch (error) { await release(id, owner, operation, error); throw error; }
     });
   });
-  app.post('/api/tasks/:id/approve', async (req, res) => {
+  routes.post('/api/tasks/:id/approve', async (req, res) => {
     const owner = (await auth(req)).wallet, state = await ready(); await assertSession(req, owner);
     if (!state.ready || !state.payer) fail('PAYMENT_NOT_READY', 503);
     try {
@@ -227,7 +242,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
       throw error;
     }
   });
-  app.post('/api/tasks/:id/revoke', async (req, res) => {
+  routes.post('/api/tasks/:id/revoke', async (req, res) => {
     exact(req.body, []); const owner = (await auth(req)).wallet;
     const task = await store.mutate(req.params.id, owner, t => {
       if (t.approval) t.approval.revoked = true;
@@ -279,7 +294,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     }
     return finish(id, owner, operation, () => {});
   }
-  app.post('/api/tasks/:id/execute', async (req, res) => {
+  routes.post('/api/tasks/:id/execute', async (req, res) => {
     exact(req.body, ['approvalId']); const owner = (await auth(req)).wallet, id = req.params.id;
     return withOperation(req, owner, async () => {
       const state = await ready(); await assertSession(req, owner);
@@ -309,6 +324,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
           await assertSession(req, owner); const freshAuthority = await current(id, owner, operation);
           if (freshAuthority.payment !== 'SIGNING' || freshAuthority.signedData) fail('EXECUTION_ALREADY_CLAIMED', 409);
           assertApproval(freshAuthority, config, state.payer, now());
+          lifecycle.assertAccepting();
         } });
         // Persist the original proof before any merchant request. No replacement
         // proof may be created even if the process exits immediately afterwards.
@@ -325,7 +341,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
       } catch (error) { await release(id, owner, operation, error); throw error; }
     });
   });
-  app.post('/api/tasks/:id/reconcile', async (req, res) => {
+  routes.post('/api/tasks/:id/reconcile', async (req, res) => {
     exact(req.body, []); const owner = (await auth(req)).wallet, id = req.params.id;
     return withOperation(req, owner, async () => {
       const { task, operation } = await begin(id, owner, 'reconcile', t => {
@@ -347,7 +363,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
       } catch (error) { await release(id, owner, operation, error); throw error; }
     });
   });
-  app.post('/api/tasks/:id/recover', async (req, res) => {
+  routes.post('/api/tasks/:id/recover', async (req, res) => {
     exact(req.body, []); const owner = (await auth(req)).wallet, id = req.params.id;
     return withOperation(req, owner, async () => {
       const { task, operation } = await begin(id, owner, 'recover', t => {
@@ -363,8 +379,15 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
       } catch (error) { await release(id, owner, operation, error); throw error; }
     });
   });
-  if (mountMerchant) app.locals.merchant = mountMerchant(app, { config, reportProvider, receiptStore: store.receipts });
-  if (mountWorkspace) app.locals.workspace = mountWorkspace(app, { config, store, auth, assertSession, now, respondTask, makeTask, withOperation });
+  if (mountMerchant) {
+    // The paid resource uses GET, but can settle a signed payment. It must not
+    // gain new admission after drain simply because GET is normally read-only.
+    app.use('/merchant', (req, res, next) => {
+      try { lifecycle.assertAccepting(); next(); } catch (error) { next(error); }
+    });
+    app.locals.merchant = mountMerchant(app, { config, reportProvider, receiptStore: store.receipts, trackWork: lifecycle.trackWork });
+  }
+  if (mountWorkspace) app.locals.workspace = mountWorkspace(routes, { config, store, auth, assertSession, now, respondTask, makeTask, withOperation });
   app.use(express.static(fileURLToPath(new URL('./web/', import.meta.url)), { index: 'index.html', etag: false, dotfiles: 'deny' }));
   app.use((req, res) => res.status(404).json({ error: { code: 'NOT_FOUND', requestId: req.requestId } }));
   app.use((error, req, res, next) => {
