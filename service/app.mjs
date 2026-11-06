@@ -142,7 +142,18 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     res.json({ wallet: session.wallet, expiresAt: new Date(session.expires).toISOString() });
   });
   routes.post('/api/auth/logout', async (req, res) => {
-    exact(req.body, []); await store.logout(token(req));
+    exact(req.body, ['expectedWallet']);
+    const capturedToken = token(req);
+    if (req.body.expectedWallet !== undefined) {
+      if (!isAddress(req.body.expectedWallet)) fail('INVALID_WALLET');
+      const session = await store.session(capturedToken);
+      if (session?.wallet === req.body.expectedWallet) await store.logout(capturedToken);
+      // Background account-change revocation is bound to this request's token.
+      // Never clear a browser cookie: a newer sign-in may already have replaced
+      // it while the lookup/deletion awaited. Mismatch and guest are also 204.
+      return res.sendStatus(204);
+    }
+    await store.logout(capturedToken);
     res.clearCookie(config.cookieName, { httpOnly: true, secure: config.secureCookies, sameSite: 'strict', path: '/' }); res.sendStatus(204);
   });
   routes.get('/api/tasks', async (req, res) => {

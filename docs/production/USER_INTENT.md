@@ -95,8 +95,9 @@ their request, plan, payment and result sections. Authenticated fresh reload
 and same-document Back/Forward restore the same record without resubmitting an
 action. Stage selection never changes the recorded financial state.
 
-The complete voice-agent screen and functional chat microphone remain open;
-[VOICE.md](VOICE.md) defines their shared audible turn and live acceptance.
+The full voice-agent screen and functional chat microphone are implemented;
+their actual microphone/provider/audibility acceptance remains open.
+[VOICE.md](VOICE.md) defines the shared audible turn and live acceptance.
 The separate administrator console is implemented under [ADMIN.md](ADMIN.md),
 with its verification and actual-role enablement kept distinct. The
 shared Task, starters and route restoration do not establish the complete

@@ -3,7 +3,7 @@
   const $ = id => document.getElementById(id), bridge = window.FlowwWorkspaceVoice, locale = window.FlowwLocale, copy = locale.copy, pcm = window.FlowwVoiceAudio;
   const state = { context: null, owner: null, generation: null, privateEpoch: 0, op: 0, capOp: 0, caps: null, capsPending: false, capController: null, ensurePending: false,
     compact: false, phase: 'idle', status: 'voice.ready', capture: null, upload: null, base: '', lease: null, language: null,
-    captureId: null, originalEditor: '', replyId: null, layout: null, speech: null, speechToken: 0, readLanguage: '', turnPin: null, turnActive: false, turnSendStarted: false, speechStartTimer: null, speechEndTimer: null, drafts: new Map(), replyLanguages: new Map() };
+    captureId: null, originalEditor: '', replyId: null, layout: null, speech: null, speechToken: 0, readLanguage: '', turnPin: null, turnActive: false, turnSendStarted: false, speechStartTimer: null, speechEndTimer: null, drafts: new Map(), replyLanguages: new Map(), documentSuspended: false, restoring: false };
   const put = (node, value) => locale.text(node, value, () => state.privateEpoch);
   const active = () => state.context?.view === 'voice' || (state.context?.view === 'assistant' && state.compact);
   const capturing = () => ['ensuring', 'permission', 'listening', 'sealing', 'transcribing'].includes(state.phase);
@@ -15,7 +15,7 @@
     WORKSPACE_CHANGED: 'voice.contextChanged', CONVERSATION_ALREADY_LINKED: 'voice.linked', VOICE_DRAFT_CHANGED: 'voice.draftChanged',
     VOICE_CONSENT_REQUIRED: 'voice.consentNeeded', INVALID_WORKSPACE_TEXT: 'voice.tooLong', VOICE_UNSUPPORTED: 'voice.unsupported',
     VOICE_DISABLED: 'voice.unavailable', VOICE_NOT_CONFIGURED: 'voice.unavailable', AUTHENTICATION_REQUIRED: 'voice.guest' };
-  const current = token => token === state.op && active();
+  const current = token => !state.documentSuspended && token === state.op && active();
   function phase(name, message) { state.phase = name; if (message) state.status = message; render(); }
   function stopTracks(stream) { for (const track of stream?.getTracks?.() ?? []) { try { track.stop(); } catch { /* release all owned tracks */ } } }
   function stopSpeech() {
@@ -53,7 +53,21 @@
   }
   function restore(context) {
     const value = state.drafts.get(key(context)); $('voice-transcript').value = value?.text ?? '';
-    state.base = value?.base ?? context.draft; state.lease = value?.lease ?? context.lease; state.language = value?.language ?? null;
+    state.base = value?.base ?? context.draft; state.lease = value?.requiresReview && value.text ? Object.freeze({}) : value?.lease ?? context.lease; state.language = value?.language ?? null;
+  }
+  function clearPrivateVoice() {
+    state.privateEpoch++; state.base = ''; state.originalEditor = ''; state.lease = null; state.language = null; state.captureId = null; state.replyId = null;
+    $('voice-transcript').value = ''; setReadLanguage('');
+    $('voice-continue').href = '#/assistant';
+    for (const id of ['voice-original-text', 'voice-preview', 'voice-answer-text', 'voice-context']) put($(id), '');
+  }
+  function suspendVoice() {
+    if (state.documentSuspended) return;
+    remember();
+    // Retain editable text only, never reusable capture/permission/operation leases.
+    for (const [id, value] of state.drafts) state.drafts.set(id, { text: value.text, base: value.base, language: value.language, requiresReview: true });
+    state.documentSuspended = true; interrupt('voice.interrupted'); state.capOp++; state.capController?.abort(); state.capController = null; state.capsPending = false; state.caps = null;
+    state.replyLanguages.clear(); clearPrivateVoice(); render();
   }
   function capabilityShape(value) {
     return value && typeof value.enabled === 'boolean' && typeof value.configured === 'boolean' && value.provider === 'openai' && value.model === 'gpt-transcribe' && value.processing === 'remote' &&
@@ -61,7 +75,7 @@
       value.sampleRate === 16000 && value.channels === 1 && value.bitsPerSample === 16 && value.maxDurationMs === 60000 && value.maxBytes === pcm.MAX_BYTES;
   }
   async function capabilities() {
-    if (!active() || !state.context?.authenticated || !state.context.authReady || state.capsPending) return;
+    if (state.documentSuspended || !active() || !state.context?.authenticated || !state.context.authReady || state.capsPending) return;
     const token = ++state.capOp, owner = state.context.owner, generation = state.context.generation, route = state.context.routeVersion;
     state.capsPending = true; render(); const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 15_000);
     state.capController = controller;
@@ -218,7 +232,7 @@
   function speak() { return playReply(bridge.readActualAssistant(), state.readLanguage, $('voice-read-voice').value); }
   function playReply(reply, language, selected, turnToken = null) {
     const voice = voices(language).find(v => v.voiceURI === selected);
-    if (!active() || busy() || (turnToken !== null && !current(turnToken)) || !reply || reply.id !== state.context?.reply?.id || !voice || !['ko', 'en'].includes(language) || typeof window.SpeechSynthesisUtterance !== 'function') return;
+    if (state.documentSuspended || !active() || busy() || (turnToken !== null && !current(turnToken)) || !reply || reply.id !== state.context?.reply?.id || !voice || !['ko', 'en'].includes(language) || typeof window.SpeechSynthesisUtterance !== 'function') return;
     stopSpeech(); const token = ++state.speechToken, identity = state.context.identity;
     const spoken = reply.kind === 'report' ? [
       reply.synthetic ? locale.copyInLanguage(language, '이 결과는 실제 네트워크에서 조회한 자료가 아닙니다.') : '',
@@ -240,6 +254,7 @@
     return true;
   }
   function render() {
+    if (state.documentSuspended) { $('voice-panel').hidden = true; return; }
     const context = state.context, open = active(), full = context?.view === 'voice', panel = $('voice-panel');
     const target = full ? $('voice-surface') : $('voice-chat-slot'); if (panel.parentNode !== target) target.append(panel);
     panel.hidden = !open; $('voice-close').hidden = full; $('voice-continue').href = context?.conversationId ? '#/assistant/conversations/' + context.conversationId : '#/assistant';
@@ -305,9 +320,11 @@
     $('voice-linked').hidden = !context?.linkedTaskId;
   }
   bridge.subscribe(context => {
+    if (context.documentSuspended) { suspendVoice(); state.context = context; return; }
+    if (state.documentSuspended) return;
     const old = state.context, ownerChanged = state.owner !== context.owner, renewed = state.generation !== context.generation;
     if (ownerChanged || renewed) {
-      remember(old); interrupt('voice.interrupted'); state.capOp++; state.capController?.abort(); state.capController = null; state.capsPending = false; state.caps = null;
+      if (!state.restoring) remember(old); interrupt('voice.interrupted'); state.capOp++; state.capController?.abort(); state.capController = null; state.capsPending = false; state.caps = null;
       if (ownerChanged && state.owner) { state.privateEpoch++; state.drafts.clear(); state.replyLanguages.clear(); state.replyId = null; setReadLanguage(''); $('voice-transcript').value = ''; state.base = ''; state.lease = null; }
       state.owner = context.owner; state.generation = context.generation;
     }
@@ -316,11 +333,18 @@
     if (routeChanged) { state.capOp++; state.capController?.abort(); state.capController = null; state.capsPending = false; }
     if (routeChanged || (identityChanged && capturing() && !state.ensurePending)) interrupt('voice.interrupted');
     if ((identityChanged || old?.reply?.id !== context.reply?.id || old?.reply?.text !== context.reply?.text) && state.speech) stopSpeech();
-    if (old && key(old) !== key(context)) {
+    if (!state.restoring && old && key(old) !== key(context)) {
       const ownBinding = state.ensurePending && !old.conversationId && Boolean(context.conversationId) && old.owner === context.owner && old.generation === context.generation && old.routeVersion === context.routeVersion;
       if (!ownBinding) { remember(old); state.context = context; restore(context); stopSpeech(); state.status = $('voice-transcript').value ? 'voice.review' : 'voice.ready'; }
     }
     state.context = context;
+    if (state.restoring && context.authReady && (!context.requestedId || context.conversationId === context.requestedId) && !context.busy) {
+      restore(context);
+      // A restored transcript is reviewable but must be explicitly rebound to
+      // the newly read scope before it can enter the authoritative composer.
+      if ($('voice-transcript').value) state.lease = Object.freeze({});
+      state.restoring = false; state.status = $('voice-transcript').value ? 'voice.review' : 'voice.ready';
+    }
     if (!state.lease && !busy()) { state.lease = context.lease; state.base = context.draft; }
     if (!active()) { state.capOp++; state.capController?.abort(); state.capController = null; state.capsPending = false; stopSpeech(); }
     render(); if (active() && context.authenticated && context.authReady && state.caps === null && !state.capsPending) capabilities();
@@ -347,6 +371,13 @@
   $('voice-speak').addEventListener('click', speak); $('voice-stop-speaking').addEventListener('click', () => { state.turnActive = false; stopSpeech(); render(); });
   window.speechSynthesis?.addEventListener?.('voiceschanged', () => { stopSpeech(); fillVoices(); render(); });
   window.addEventListener('floww:locale', () => { interrupt('voice.interrupted'); render(); });
+  window.addEventListener('floww:document-suspend', suspendVoice);
+  window.addEventListener('floww:document-resume', event => {
+    state.documentSuspended = false; state.restoring = event.detail?.sameOwner === true;
+    if (!state.restoring) state.drafts.clear();
+    state.compact = false; clearPrivateVoice();
+  });
+  window.addEventListener('floww:document-reset', () => { state.drafts.clear(); clearPrivateVoice(); $('voice-consent').checked = false; $('voice-mode').value = 'review'; });
   window.addEventListener('pagehide', () => { interrupt('voice.interrupted'); state.capOp++; state.capController?.abort(); state.capController = null; state.capsPending = false; });
   document.addEventListener?.('visibilitychange', () => { if (document.hidden) interrupt('voice.interrupted'); });
   document.addEventListener?.('keydown', event => { if (event.key === 'Escape' && active()) { event.preventDefault(); interrupt('voice.cancelled', { cancel: true }); if (state.compact) { state.compact = false; render(); $('voice-launch').focus(); } else focusVoiceHeading(); } });

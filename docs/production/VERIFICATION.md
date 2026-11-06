@@ -405,6 +405,51 @@ separately authorized Audio credential, real microphone input, actual STT and
 human-audible KO/EN replies. The code and default image keep voice off until
 explicitly configured. Actual image/CI evidence belongs to the exact PR head.
 
+## Browser-session lifecycle and conditional logout — 2026-11-07
+
+[SESSION_LIFECYCLE.md](SESSION_LIFECYCLE.md) defines the departure/return contract
+and its distinction between cold form restoration and a cached document.
+
+- A native baseline using PR17's pinned web assets, generated signed A/B
+  identities, actual HTTP and owned file-SQLite reproduced A's unsent text
+  under B after whole-document Back. Production `no-store` headers were
+  preserved. The new document ID and `persisted=false` prove this was cold
+  form-history restoration, not a native BFCache observation. No text was sent
+  and no real user's data, model or financial port was used.
+- The final behavior passed **613 full Node checks, zero failed/skipped**, with
+  required owned PostgreSQL enabled. Independent complete UI acceptance passed
+  **285 checks** across11 suites. The21 lifecycle checks exercise pending
+  approval→execution and message→planning fences, session-read/owner races,
+  exact retry identities, acknowledgment resets and media cleanup through the
+  shipped scripts with controlled ports. They do not stand for real Phantom,
+  provider or device acceptance.
+- Seven actual HTTP/Ed25519/file-SQLite checks cover conditional captured-token
+  revocation, guest/mismatch no-op204, strict input/origin guards, authority-read
+  failure and delayed lookup/deletion racing a new B sign-in. Every conditional
+  response omits `Set-Cookie`; manual `{}` logout still clears the cookie.
+- Frozen behavior-source native acceptance now discards A's old form under B,
+  refetches the same owner's stored conversation at its original address and
+  clears private DOM/fields/opaque targets after session revocation. Cold
+  unbound unsent text is discarded; same-document owner-bound draft quarantine
+  is a separately tested path. A scripted3s session-read delay left the layout
+  hidden and old content absent from all DOM, including input values, until
+  verified reads completed. No model/financial operation or automatic write
+  occurred in the final native process.
+- Final390×844 readback measured390/390px content with no overflow on the
+  neutral gate. The heading was then shortened in KO/EN for first-entry accuracy
+  and phone readability. That final copy-only adjustment passed46 focused
+  locale/lifecycle checks and a new native390px readback; all other behavioral
+  source hashes stayed unchanged from the613-case run. Actual image/CI checks
+  still belong to the final exact PR head. The viewport was reset and temporary
+  fixture tabs were closed.
+
+Native Back recreated documents even in a separate explicitly cache-eligible
+engineering fixture. Actual `pageshow.persisted=true` remains unexercised in the
+available browser; scripted events and `no-store` do not close that native
+evidence gate. No production header, schema, credential or signing grant was
+weakened. Before/after images, source hashes, sanitized observations and exact
+release/CI binding are retained outside Git in the local GWDC evidence directory.
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

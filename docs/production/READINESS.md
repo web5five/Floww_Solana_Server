@@ -51,16 +51,17 @@ of security certification, accessibility conformance or a contractual SLA.
 ## Current iteration evidence
 
 The table's starting checkpoint is historical, not a list of features still
-absent. Released main `4e21fa1` includes the reviewed PR11–16 changes:
+absent. Released comparison checkpoint `d7995f6` includes the reviewed PR11–17 changes:
 
 - P03–P06: dedicated DB/ledger readiness, bounded HTTP shutdown, merchant replay
   admission and redacted fixed-label diagnostics have implementation and
   negative-path regression evidence.
 - P01/P08/P11: whole-interface KO/EN, scope correction, denial recovery,
   versioned scripted journey cases and purpose-led desktop/tablet/phone design
-  are verified within the boundaries below. Voice, full keyboard/zoom coverage,
-  actual-model quality and funded completion remain open.
-- P10: [PR16's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42266339473)
+  are verified within the boundaries below. The full voice implementation has
+  controlled engineering acceptance; actual microphone/provider/audibility,
+  full keyboard/zoom coverage, actual-model quality and funded completion remain open.
+- P10: [PR17's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42279768923)
   passed both required PostgreSQL/runtime/Python checks and an actual non-root,
   network-isolated image check. It did not deploy a public service.
 
@@ -95,8 +96,9 @@ Drafts, exact retry identities, current-owner state and keyboard focus have
 dedicated race coverage and native-browser readback. No route authorizes a
 financial operation or creates a replacement request.
 
-Remaining product work includes the full voice-agent screen and chat microphone,
-actual-model quality acceptance, approved public-demo
+Remaining product work includes actual microphone/provider/audibility acceptance
+for the implemented full voice view and chat microphone, actual-model quality,
+approved public-demo
 acceptance and separately approved wallet/funded Devnet completion. None is
 closed by the above test counts.
 
@@ -127,10 +129,14 @@ provider availability. Exact-source image CI and later public-demo acceptance
 remain distinct release gates.
 
 Browser-history acceptance in the navigation work covers same-document hash
-Back/Forward and a fresh reload. Whole-document BFCache restoration across an
-external logout/owner change still needs a dedicated lifecycle test; neither
-`Cache-Control: no-store` nor the small DOM harness proves that boundary. No
-live BFCache data leak has been demonstrated by the current audit.
+Back/Forward and a fresh reload. A later native cold-Back test with generated
+identities demonstrated old-owner form text under a different current owner,
+even with production `no-store` headers. The document was recreated with
+`persisted=false`; this is not a native BFCache leak claim.
+[SESSION_LIFECYCLE.md](SESSION_LIFECYCLE.md) defines the departure, cold-entry,
+authoritative revalidation and conditional logout contract. Actual native
+BFCache restoration remains unexercised in the available internal-browser
+observations; scripted lifecycle tests alone cannot close that evidence gate.
 
 ## Improvement loop
 
