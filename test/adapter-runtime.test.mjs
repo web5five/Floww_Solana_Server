@@ -58,7 +58,7 @@ async function fixture(t, status = HEALTHY, { configured = true } = {}) {
     propose: async () => { calls.propose++; return { status: 'PROPOSED', proposal_ref: 'scripted-proposal' }; },
     consume: async () => { calls.consume++; return { status: 'EVIDENCE_READY', code: 'SCRIPTED_ANALYSIS', answer: { is_synthetic: true } }; },
   };
-  const metadata = { modelVersion: config.model, promptVersion: 'workspace/v1' };
+  const metadata = { modelVersion: config.model, promptVersion: 'workspace/v5' };
   const planner = {
     refine: async input => { calls.refine++; return { status: 'READY_TO_PLAN', assistantText: 'Scripted contract response',
       intent: { ...input.intent, resourceId: 'wallet-transfers', missingFields: [] }, ...metadata,

@@ -463,3 +463,53 @@ Render is still a separately authorized deployment step. The blueprint targets
 repository-app installation permission and final public origin are not implied
 by a successful local build. External funded Devnet settlement/delivery and
 Phantom user acceptance remain separate from the tests listed above.
+# Actual-model baseline and output contract — November7
+
+The first pre-sample-frozen live12-case/32-stage set ran40 actual Responses calls
+against main `34a28b1` / `workspace/v1`. All returned, without retry, port failure
+or omitted stages. Automated checks passed7/12 cases and22/32 stages; the sample
+failed product acceptance. Independent agent review inspected32 stages/40 role
+returns and retained `humanReviewed=false`. Exact scope matched all22 refinement
+stages, but count/direction/language presentation, Korean supported recovery and
+a critic authority false positive still failed. Fixed English coverage copy and
+model-generated English prose were attributed separately.
+
+The controller preserved the original sample before source changes. The new
+version2 corpus keeps the same cases, rubric and expected labels and explicitly
+labels this a `post-baseline-regression`. [AI_QUALITY.md](AI_QUALITY.md) records
+the source/suite binding, usage calculation, safe live-run boundary and the
+remaining semantic acceptance work.
+
+The output-contract implementation passed local Node618/618 with zero skips and
+required owned PostgreSQL, plus Python242/242. These include actual signed
+HTTP/file-SQLite owner checks for valid/invalid/omitted interface language and
+exact retry identity; UI retry across a language change; actual Node-to-Python
+subprocess-to-loopback Responses propagation; and actual Python stdin/stdout
+tests for priority and negation without external credentials. They prove local
+integration, not actual-provider language/refusal improvement or payment.
+
+
+## Conversation regression and Michael handoff — November7
+
+Source `d4a35ab8b24c524318816dfb894a5c2d5dec143d`, prompt `workspace/v5`,
+passed618 local Node tests with required isolated PostgreSQL (no skips) and274
+Python tests. Independent source review passed118 targeted checks; the explicit
+live supervisor passed18 offline checks. Syntax/whitespace/NFC checks passed.
+
+Actual Responses acceptance completed12/12 cases and32/32 stages with40 core
+role returns, plus2/2 interface-language probes with4 more returns. All44 POSTs
+had strict usage receipts, no retry or uncertainty, and81.039seconds total
+runtime. Independent agent review inspected all stages/probes/raw returns and
+found no additional P1/P2 or actionable finding in that sample. Actual-person
+review was not performed. [AI_QUALITY.md](AI_QUALITY.md) preserves prior failed
+samples and explains the small regression set, synthetic formatter facts and
+version5's raw-five/derived-six intent contract. No paid report, microphone,
+user-installed wallet, funded payment or public deployment is established by it.
+
+Michael's five implementation questions map to [TEAM_HANDOFF.md](../integration/TEAM_HANDOFF.md).
+Read-only external Devnet genesis, confirmed blockhash and facilitator exact-V2
+support probes all returned HTTP200 on November7. Infisical browser readback
+showed12 masked Development entries and only the owner's project Admin user;
+team sharing remains incomplete. Neither verification signed a transaction,
+changed grants or exposed a secret value. Required exact-source CI and actual
+container checks remain part of the normal PR release gate.

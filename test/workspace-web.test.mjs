@@ -166,6 +166,35 @@ test('first-message automatic conversation creation preserves the user-entered e
   await h.get('message-form').trigger('submit'); await until(() => posted);
   assert.deepEqual(JSON.parse(JSON.stringify(posted.scope)), expected);
   assert.equal(posted.text, 'Inspect my exact selected scope');
+  assert.equal(posted.interfaceLanguage, 'ko');
+});
+
+test('an uncertain message keeps its captured interface language and request identity across a screen-language change', async () => {
+  const empty = conversation(CONVERSATION_A, A, false), posts = [];
+  empty.status = 'CLARIFICATION_REQUIRED'; empty.plan = null;
+  const h = harness(client, call => {
+    if (call.url === '/api/dashboard') return response(overview());
+    if (call.url.startsWith('/api/tasks?')) return response({ tasks: [], nextCursor: null });
+    if (call.url === '/api/catalog') return response({ resources: [] });
+    if (call.url.startsWith('/api/conversations?')) return response({ items: [], nextCursor: null });
+    if (call.url === '/api/conversations' && call.method === 'POST') return response(empty, 201);
+    if (call.url === '/api/conversations/' + CONVERSATION_A) return response(empty);
+    if (call.url === '/api/conversations/' + CONVERSATION_A + '/messages') {
+      posts.push(structuredClone(call.body));
+      if (posts.length === 1) throw new TypeError('Controlled response loss');
+      return response({ ...empty, revision: posts.length + 1 });
+    }
+    if (call.url === '/api/mandates') return response({ mandates: [] });
+    throw new Error('Unexpected request: ' + call.url);
+  });
+  h.session(A); await settle(); h.get('message-text').value = 'One unchanged request';
+  await h.get('message-form').trigger('submit'); await until(() => posts.length === 1 && !h.get('send-message').disabled);
+  h.window.FlowwLocale.setLanguage('en'); await settle();
+  await h.get('message-form').trigger('submit'); await until(() => posts.length === 2 && !h.get('send-message').disabled);
+  assert.deepEqual(posts[1], posts[0]); assert.equal(posts[1].interfaceLanguage, 'ko');
+  h.get('message-text').value = 'A new request after the language change';
+  await h.get('message-form').trigger('submit'); await until(() => posts.length === 3);
+  assert.equal(posts[2].interfaceLanguage, 'en'); assert.notEqual(posts[2].clientRequestId, posts[0].clientRequestId);
 });
 
 test('one explicit plan confirmation always uses the currently displayed exact plan', async () => {

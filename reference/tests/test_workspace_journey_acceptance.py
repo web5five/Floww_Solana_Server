@@ -46,7 +46,7 @@ def data_for(case):
 
 
 def refined(intent, status="READY_TO_PLAN"):
-    return {"status": status, "assistantText": "Scripted acceptance response.", "intent": intent}
+    return {"status": status, "assistantText": "Scripted acceptance response.", "intent": {key: value for key, value in intent.items() if key != "missingFields"}}
 
 
 def proposal():
@@ -99,7 +99,10 @@ class WorkspaceJourneyAcceptanceTests(unittest.TestCase):
                 self.assertEqual(stale_scope["status"], "STOPPED")
                 result = run("refine", data, ScriptedRoles(refined(corrected)))
                 self.assertEqual(result["status"], "READY_TO_PLAN")
-                self.assertEqual(result["intent"], corrected)
+                self.assertEqual({key: value for key, value in result["intent"].items() if key != "purpose"},
+                                 {key: value for key, value in corrected.items() if key != "purpose"})
+                self.assertTrue(result["intent"]["purpose"].startswith(corrected["purpose"] + "\n"))
+                self.assertEqual(infer_output_options(result["intent"]["purpose"]), infer_output_options(corrected["purpose"]))
                 data["intent"] = result["intent"]
                 rejected = ScriptedRoles(old_plan)
                 self.assertEqual(run("plan", data, rejected)["code"], "WORKSPACE_STALE_CONTEXT")
@@ -107,7 +110,7 @@ class WorkspaceJourneyAcceptanceTests(unittest.TestCase):
                 data["messages"].append({"id": "style-only", "role": "user",
                                          "text": case["turns"][2]["text"]})
                 kept = run("refine", data, ScriptedRoles(refined(corrected)))
-                self.assertEqual(kept["intent"], corrected)
+                self.assertEqual(kept["intent"], result["intent"])
                 reviewed = ScriptedRoles(proposal(), critic())
                 self.assertEqual(run("plan", data, reviewed)["status"], "PROPOSED")
                 self.assertEqual(reviewed.roles, ["plan", "critic"])
