@@ -104,6 +104,48 @@ finishes. The bounded HTTP-close result reports that incompleteness. No forced
 DB-session termination or automatic release of uncertain `HELD` reservations
 is introduced, and full startup resource-leak hardening is not claimed.
 
+## Original-prompt product follow-up
+
+The controller read the user's original submission-day messages, rather than
+using only assistant recaps. [USER_INTENT.md](USER_INTENT.md) maps the relevant
+KST times/source lines to current product acceptance and keeps still-open
+step-navigation, guided-entry, voice and administrative requests visible.
+
+- Final local non-PostgreSQL Node checks: **288 passed, zero failed/skipped**.
+  The25 new UI contract/state cases are included. Python: **209 passed**.
+  Syntax/whitespace/NFC checks cover67 integration files; `actionlint` and
+  `git diff --check` passed. Low host disk space prevented running fresh local
+  PostgreSQL clusters in this follow-up; those tests remain mandatory in CI.
+- Interface locale changes update explicit authored text/attributes without
+  navigation, rendering the whole view, submitting or fetching. Epoch guards
+  prevent old-owner bindings from restoring private content. Drafts, exact
+  amounts, consent, source text and report-download bytes are preserved.
+- Actual approval403 denials trigger at most one guarded read of the same Task.
+  Late old-owner200/401, selection changes, failed reads and a new sign-in are
+  covered. An obsolete operation cannot clear a newer operation's busy state.
+  DENY remains distinct from pending approval and confirmed payment.
+- Two real loopback HTTP/auth/SQLite journeys exercise failure/replay/explicit
+  retry, corrected-plan binding, one Task and actual approval-policy outcomes.
+  They use a real keyless Python quote-proposal adapter and scripted model ports.
+  ALLOW, budget refusal and recipient refusal all leave payment/delivery
+  unstarted, with zero signer/redemption calls. These are not funded E2E runs.
+- The versioned four-case KO/EN corpus is `contract_acceptance`, with
+  `model_quality_evaluated=false`. Actual Python validators, critic gates,
+  presentation and renderers preserve exact large amounts, references and
+  partial-coverage limits. Unpaid integration consumption releases no answer.
+- Internal-browser checks cover the actual unauthenticated managed-PostgreSQL
+  preview plus separately scripted display cases. The latter check approval,
+  same-Task chat denial and UNKNOWN recovery at desktop/390px; they do not prove
+  real authentication or payment. One approval-language switch left requests
+  at6 before/after and POSTs at0, preserving a9-decimal budget and checked consent.
+- The team SVG is byte-identical to the original submitted Client asset. The
+  local runtime serves it successfully with no third-party asset request.
+
+Screenshots and sanitized readbacks remain outside the repository in the local
+GWDC evidence directory. Exact release/CI source binding is recorded separately;
+the checks above do not imply that a public deployment or Phantom transaction
+has happened.
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

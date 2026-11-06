@@ -7,6 +7,7 @@ const html = await readFile(new URL('index.html', base), 'utf8');
 const client = await readFile(new URL('workspace-client.js', base), 'utf8');
 const taskClient = await readFile(new URL('app.js', base), 'utf8');
 const units = await readFile(new URL('units.js', base), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error; });
+const locale = await readFile(new URL('locale.js', base), 'utf8');
 const A = '11111111111111111111111111111111', B = '11111111111111111111111111111112';
 const TASK_A = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa', TASK_B = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
 const CONVERSATION_A = 'cccccccc-cccc-4ccc-cccc-cccccccccccc', CONVERSATION_B = 'dddddddd-dddd-4ddd-dddd-dddddddddddd';
@@ -21,8 +22,8 @@ async function until(check) {
 // Execute the unmodified browser clients with inert DOM primitives. These tests
 // exercise request ordering, public events and visible text; they do not assert
 // implementation source strings, claim layout coverage, or contact a network.
-function harness(source, fetcher) {
-  const nodes = [], ids = new Map(), intervals = new Map(), windowEvents = new Map(), events = [], backgroundErrors = []; let timerId = 0;
+function harness(source, fetcher, { languages = ['ko-KR'], savedLocale, storageDenied = false } = {}) {
+  const nodes = [], ids = new Map(), intervals = new Map(), windowEvents = new Map(), events = [], backgroundErrors = [], downloads = [], blobs = new Map(); let timerId = 0;
   class Node {
     constructor(tag = 'div') { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.attributes = {};
       this.listeners = new Map(); this.value = ''; this.checked = false; this.disabled = false; this.hidden = false; this.ownText = ''; nodes.push(this); }
@@ -33,7 +34,7 @@ function harness(source, fetcher) {
     } this.children.push(child); } }
     appendChild(child) { this.append(child); return child; }
     replaceChildren(...children) { for (const child of this.children) if (typeof child === 'object') child.parentNode = null; this.children = []; this.ownText = ''; this.append(...children); }
-    setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = String(value); if (key.startsWith('data-')) this.dataset[key.slice(5)] = String(value); }
+    setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = String(value); if (['title', 'placeholder', 'lang'].includes(key)) this[key] = String(value); if (key.startsWith('data-')) this.dataset[key.slice(5)] = String(value); }
     getAttribute(key) { if (key === 'class') return this.className ?? null; if (key.startsWith('data-')) return this.dataset[key.slice(5)] ?? null; return this.attributes[key] ?? null; }
     hasAttribute(key) { return this.getAttribute(key) !== null; }
     removeAttribute(key) { delete this.attributes[key]; }
@@ -46,7 +47,7 @@ function harness(source, fetcher) {
     reset() { const walk = node => { if (['INPUT', 'TEXTAREA', 'SELECT'].includes(node.tagName)) {
       node.value = node.defaultValue ?? ''; node.checked = node.defaultChecked ?? false;
     } node.children.forEach(child => { if (typeof child === 'object') walk(child); }); }; walk(this); }
-    focus() {}
+    focus() { document.activeElement = this; }
     scrollIntoView() {}
     contains(node) { return node === this || this.children.some(child => typeof child === 'object' && child.contains(node)); }
     get parentElement() { return this.parentNode ?? null; }
@@ -54,7 +55,8 @@ function harness(source, fetcher) {
     querySelector(selector) { return this.querySelectorAll(selector)[0] ?? null; }
     remove() { if (this.parentNode) this.parentNode.children = this.parentNode.children.filter(node => node !== this); this.parentNode = null; }
     async trigger(type, extra = {}) { await Promise.all((this.listeners.get(type) ?? []).map(fn => fn({ type, target: this, currentTarget: this, preventDefault() {}, ...extra }))); }
-    click() { const action = this.trigger('click'); action.catch(error => backgroundErrors.push(error)); return action; }
+    click() { if (this.tagName === 'A' && blobs.has(this.href)) downloads.push({ name: this.download, blob: blobs.get(this.href) });
+      const action = this.trigger('click'); action.catch(error => backgroundErrors.push(error)); return action; }
     requestSubmit(submitter) { const action = this.trigger('submit', { submitter }); action.catch(error => backgroundErrors.push(error)); return action; }
     set innerHTML(_) { throw new Error('Raw HTML insertion is not supported by this security harness'); }
   }
@@ -108,20 +110,31 @@ function harness(source, fetcher) {
     const descendants = []; const visit = node => { for (const child of node.children) if (typeof child === 'object') { descendants.push(child); visit(child); } }; visit(scope);
     return descendants.filter(node => selector.split(',').some(part => matches(node, part)));
   }
-  const document = { hidden: false, body: nodes.find(node => node.tagName === 'BODY'),
+  const document = { hidden: false, body: nodes.find(node => node.tagName === 'BODY'), documentElement: nodes.find(node => node.tagName === 'HTML'), activeElement: null,
     getElementById: id => ids.get(id) ?? null, createElement: tag => new Node(tag),
     querySelectorAll: selector => select(root, selector), querySelector: selector => select(root, selector)[0] ?? null };
   class Event { constructor(type, options = {}) { this.type = type; this.detail = options.detail; } }
   const window = { scrollTo() {}, addEventListener(type, fn) { const values = windowEvents.get(type) ?? []; values.push(fn); windowEvents.set(type, values); },
     dispatchEvent(event) { events.push(event); for (const fn of windowEvents.get(event.type) ?? []) fn(event); return true; } };
+  const storage = new Map(savedLocale === undefined ? [] : [['floww.ui.locale', savedLocale]]), storageWrites = [];
+  window.navigator = { languages, language: languages[0] };
+  window.localStorage = {
+    getItem(key) { if (storageDenied) throw new Error('Storage unavailable'); return storage.get(key) ?? null; },
+    setItem(key, value) { if (storageDenied) throw new Error('Storage unavailable'); storageWrites.push([key, String(value)]); storage.set(key, String(value)); },
+  };
   const calls = [];
+  class BrowserURL extends URL {
+    static createObjectURL(blob) { const key = 'blob:scripted-ui-' + blobs.size; blobs.set(key, blob); return key; }
+    static revokeObjectURL(key) { blobs.delete(key); }
+  }
   const context = { document, window, CustomEvent: Event, Option: function Option(text, value) { const n = new Node('option'); n.textContent = text; n.value = value; return n; },
     fetch: async (url, options) => { const call = { url: String(url), ...options, body: options?.body ? JSON.parse(options.body) : undefined }; calls.push(call); return fetcher(call); },
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; }, clearInterval(id) { intervals.delete(id); },
-    setTimeout() { return ++timerId; }, clearTimeout() {}, AbortController, URL, URLSearchParams, Intl, Date,
+    setTimeout() { return ++timerId; }, clearTimeout() {}, AbortController, URL: BrowserURL, URLSearchParams, Intl, Date,
     TextEncoder, Uint8Array, Blob, btoa, queueMicrotask, crypto: globalThis.crypto };
-  vm.runInNewContext(units + '\n' + source, context, { filename: 'browser-client-under-test.js' });
+  vm.runInNewContext(units + '\n' + locale + '\n' + source, context, { filename: 'browser-client-under-test.js' });
   return { document, window, nodes, calls, intervals, events, backgroundErrors, get: id => ids.get(id),
+    storage, storageWrites, downloads,
     emit(type, detail) { window.dispatchEvent(new Event(type, { detail })); },
     session(wallet, health = { ready: false }) { window.dispatchEvent(new Event('floww:session', { detail: { wallet, health } })); },
     nav(name) { return nodes.find(node => node.dataset.view === name).trigger('click'); } };

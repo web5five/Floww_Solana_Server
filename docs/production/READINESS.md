@@ -6,6 +6,9 @@ sound product, with real behavior and evidence. PR #10 / main `1a3f964` is the
 starting comparison checkpoint. Each iteration needs a measured before/after
 result and exact-source review, not a new feature count.
 The exact-source comparison is [COMPARISON.md](COMPARISON.md).
+The original submission-day requests and their product acceptance mapping are
+in [USER_INTENT.md](USER_INTENT.md). They prioritize an integrated, usable demo,
+coherent KO/EN presentation and real user journeys over generic infrastructure.
 
 ## Acceptance standard
 
@@ -47,16 +50,24 @@ of security certification, accessibility conformance or a contractual SLA.
 
 ## Current iteration evidence
 
-Local validation now passes Node289/Python206. The dedicated readiness/drain,
+The preceding PR11 passed full local Node289/Python206 checks. Its readiness/drain,
 merchant replay admission, redacted diagnostics and scope-correction fixes have
 independent review. Result-first KO/EN exports preserve exact facts and have
 synthetic-render desktop/mobile acceptance. See [VERIFICATION.md](VERIFICATION.md)
 for what each kind of evidence actually proves.
 
-Remaining product work includes whole-interface KO/EN parity with the earlier
-Client, a small versioned workspace-quality evaluation set, model-bridge
-preflight/outage UX, approved public-demo acceptance and separately approved
-wallet/funded Devnet completion. None is closed by the above test counts.
+The original-prompt follow-up adds whole-interface KO/EN presentation, the
+preserved team mark and explicit denial guidance. Its four versioned KO/EN
+contract cases connect scope correction, reviewed plans, one Task and grounded
+exports; actual-model quality is still unevaluated by these scripted cases.
+Local follow-up checks pass288 non-PostgreSQL Node tests and209 Python tests.
+Required PostgreSQL and image acceptance remain the exact PR's CI gates.
+
+Remaining product work includes explicit step navigation/history and guided
+entry cards, voice input, broader administrative audit presentation, actual-model
+quality acceptance, model-bridge preflight/outage UX, approved public-demo
+acceptance and separately approved wallet/funded Devnet completion. None is
+closed by the above test counts.
 
 ## Improvement loop
 
