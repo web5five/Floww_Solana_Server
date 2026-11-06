@@ -17,7 +17,8 @@ chat, authentication exchanges and private account context are not published.
 | 03:40: “배포까지 진행해서 다시 검증하고” | 70498 | Recheck the actual approved deployment after release. Local success is a separate result. |
 | 06:30: Overview, wallet login, three scenario cards, page transitions and chat execution | 71899 | Keep a clear entry, authenticated execution and one shared Task across guided and conversational use. |
 | 06:32: Keep mock/prototype/MVP labels out of the product | 71971 | Write useful action/result copy; never conceal missing runtime data with invented success. |
-| 07:18: Add a microphone to chat after the voice-agent screen is connected | 73018 | Voice is a requested interaction, not permission for speech to approve payment. Track its current implementation separately. |
+| 07:12: Connect the voice-agent screen using the then-current approved voice integration | 72901 | Preserve the complete audible-agent surface; historical key approval is not a grant for the current restricted credential. |
+| 07:18: Add a microphone to chat after the voice-agent screen is connected | 73018 | The full screen and chat launcher share the same request/Task. Speech does not approve payment. Track actual speech acceptance separately. |
 | 07:55: “진짜 백엔드까지 연결돼서 E2E 로 끝나야” and web/mobile visual quality | 73880 | Exercise real interfaces and both viewport sizes. Scripted cases remain explicitly identified in verification records. |
 | 08:01: Match the GitHub organization logo and preserve it as vector artwork | 73992 | Reuse the team's existing reviewed SVG, with source provenance. |
 | 08:04: Implement, integrate, verify, deploy, verify again and improve visual completeness | 74058 | Continue with observable before/after acceptance, rather than stopping at an implementation report. |
@@ -94,14 +95,18 @@ their request, plan, payment and result sections. Authenticated fresh reload
 and same-document Back/Forward restore the same record without resubmitting an
 action. Stage selection never changes the recorded financial state.
 
-Voice input and broader administrative audit presentation remain open. The
+The complete voice-agent screen and functional chat microphone remain open;
+[VOICE.md](VOICE.md) defines their shared audible turn and live acceptance.
+The separate administrator console is implemented under [ADMIN.md](ADMIN.md),
+with its verification and actual-role enablement kept distinct. The
 shared Task, starters and route restoration do not establish the complete
 former scenario-to-deployment journey or current funded settlement.
 
 The administrator request includes its own dashboard, usable logs/graphs, a
 review of the available data and an image-first design-to-code pass. The
-current owner-scoped activity page does not close that requirement. Its
-authorization model and redacted cross-owner data need separate verification.
+owner-scoped activity page does not close that requirement. Its separate
+authorization, redacted projections and native checks are recorded in
+[VERIFICATION.md](VERIFICATION.md); live activation needs a designated operator.
 
 The user's November6 clarification controls the scope: production-level quality
 for a hackathon entry. An always-on commercial service, paid infrastructure and

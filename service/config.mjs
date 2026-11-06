@@ -21,6 +21,11 @@ export const fail = (code, status) => { throw new ServiceError(code, status); };
 export const isAddress = value => {
   try { return typeof value === 'string' && address(value) === value; } catch { return false; }
 };
+export function adminWallets(value = []) {
+  if (!Array.isArray(value) || value.length > 5 || [...value].some(wallet => !isAddress(wallet)) ||
+      new Set(value).size !== value.length) fail('INVALID_CONFIGURATION', 500);
+  return Object.freeze([...value]);
+}
 export function atomic(value) {
   if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,38})$/.test(value)) fail('INVALID_AMOUNT');
   return BigInt(value);
@@ -79,6 +84,9 @@ export function loadConfig(env = process.env) {
   const port = Number(env.PORT || originUrl.port || (originUrl.protocol === 'https:' ? 443 : 80));
   if (!Number.isInteger(port) || port < 1 || port > 65535) fail('INVALID_CONFIGURATION', 500);
   const paymentEnabled = env.FLOWW_ENABLE_DEVNET_PAYMENTS === 'true';
+  const adminInput = env.FLOWW_ADMIN_WALLETS ?? '';
+  if (typeof adminInput !== 'string' || adminInput.length > 512) fail('INVALID_CONFIGURATION', 500);
+  const administrators = adminWallets(adminInput === '' ? [] : adminInput.split(',').map(value => value.trim()));
   return Object.freeze({
     origin, publicOrigin: origin, host, port, network, deploymentMode,
     cookieName: originUrl.protocol === 'https:' ? '__Host-floww_session' : 'floww_session',
@@ -91,7 +99,7 @@ export function loadConfig(env = process.env) {
     merchantOrigin: origin, merchantBaseUrl: origin + '/merchant/reports',
     merchantPayTo, asset, assetDecimals: 6, amountAtomic, maxPaymentAtomic, dailyPaymentAtomic,
     maxConcurrentOperations, maxOwnerConcurrentOperations, globalModelDailyLimit, ownerModelDailyLimit,
-    paymentEnabled, payerKeyFile: env.FLOWW_PAYER_KEY_FILE || null,
+    paymentEnabled, payerKeyFile: env.FLOWW_PAYER_KEY_FILE || null, adminWallets: administrators,
     requestTimeoutMs: 12000, quoteTtlMs: 5 * 60_000, sessionTtlMs: 8 * 3600_000,
     model: env.FLOWW_MODEL || null, apiKey: env.OPENAI_API_KEY || null,
     python: env.FLOWW_PYTHON || 'python3',

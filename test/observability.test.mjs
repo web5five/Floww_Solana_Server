@@ -113,3 +113,35 @@ test('real HTTP diagnostics correlate request IDs while excluding private URL an
     server.closeIdleConnections(); await new Promise(resolve => server.close(resolve)); store.close();
   }
 });
+test('operator minutes cover only process observation and retain at most sixty UTC buckets', () => {
+  let epoch = Date.UTC(2026, 10, 7, 3, 1, 20);
+  const telemetry = createRequestTelemetry({ write: () => {}, clock: () => 0, wallClock: () => epoch });
+  const finish = () => { const res = response(); telemetry.observeRequest({ method: 'GET', route: { path: '/livez' } }, res); res.emit('finish'); };
+  finish();
+  let snapshot = telemetry.operatorSnapshot();
+  assert.equal(snapshot.startedAt, '2026-11-07T03:01:20.000Z'); assert.equal(snapshot.minuteBuckets.length, 1);
+  assert.equal(snapshot.minuteWindowFrom, snapshot.startedAt); assert.equal(snapshot.minuteBuckets[0].completed, 1);
+  epoch += 120_000; finish(); snapshot = telemetry.operatorSnapshot();
+  assert.deepEqual(snapshot.minuteBuckets.map(row => row.completed), [1, 0, 1]);
+  epoch += 61 * 60_000; snapshot = telemetry.operatorSnapshot();
+  assert.equal(snapshot.minuteBuckets.length, 60); assert.equal(snapshot.minuteWindowFrom, '2026-11-07T03:05:00.000Z');
+  assert.ok(snapshot.minuteBuckets.every(row => row.completed === 0)); assert.equal(snapshot.completed, 2);
+});
+test('unmeasured or backwards wall time never fabricates a timestamp or minute history', () => {
+  let epoch = Date.UTC(2026, 10, 7, 3, 1, 20);
+  const telemetry = createRequestTelemetry({ write: () => {}, clock: () => 0, wallClock: () => epoch });
+  const finish = () => { const res = response(); telemetry.observeRequest({ method: 'GET', route: { path: '/api/admin/events' } }, res); res.emit('finish'); };
+  epoch -= 1; finish(); assert.throws(() => telemetry.operatorSnapshot(), /ADMIN_CLOCK_UNAVAILABLE/);
+  epoch += 2; const snapshot = telemetry.operatorSnapshot();
+  assert.equal(snapshot.requests[0].at, null); assert.equal(snapshot.requests[0].route, 'admin_events');
+  assert.equal(snapshot.unmeasuredTime, 1); assert.equal(snapshot.clockRegressions, 2);
+  assert.equal(snapshot.minuteBuckets[0].completed, 0); assert.equal(snapshot.completed, 1);
+});
+test('operator request history is detached, fixed-label and bounded even when stdout is suppressed', () => {
+  const telemetry = createRequestTelemetry({ maxLogsPerMinute: 0 });
+  for (let i = 0; i < 205; i++) { const res = response(); telemetry.observeRequest({ method: 'GET', route: { path: '/private/' + i } }, res); res.emit('finish'); }
+  const first = telemetry.operatorSnapshot(); assert.equal(first.requests.length, 200); assert.equal(first.retainedAway, 5);
+  assert.equal(first.suppressed, 205); assert.ok(first.requests.every(row => row.route === 'unclassified'));
+  first.requests[0].route = 'private'; first.minuteBuckets[0].completed = -1;
+  const second = telemetry.operatorSnapshot(); assert.equal(second.requests[0].route, 'unclassified'); assert.equal(second.minuteBuckets[0].completed, 205);
+});

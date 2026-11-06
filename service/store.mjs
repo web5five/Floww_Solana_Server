@@ -1,5 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, openSync, closeSync, lstatSync, chmodSync } from 'node:fs';
+import { mkdirSync, openSync, closeSync, lstatSync, chmodSync, realpathSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { ServiceError, fail } from './config.mjs';
@@ -71,6 +71,12 @@ export class Store {
       chmodSync(path, 0o600);
     }
     this.db = new DatabaseSync(path);
+    // An operator reader may open only this exact owned file, independently and
+    // read-only. Never infer it from configuration when a Store was injected.
+    const stateFile = path === ':memory:' ? null : realpathSync(path);
+    const stateStat = stateFile === null ? null : lstatSync(stateFile);
+    Object.defineProperty(this, 'adminReadSource', { value: Object.freeze({ kind: 'sqlite',
+      path: stateFile, device: stateStat?.dev ?? null, inode: stateStat?.ino ?? null }), enumerable: false });
     this.db.exec(`PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON; PRAGMA journal_mode=DELETE;
       CREATE TABLE IF NOT EXISTS challenges(id TEXT PRIMARY KEY, wallet TEXT NOT NULL, message TEXT NOT NULL, expires INTEGER NOT NULL, created INTEGER NOT NULL, consumed INTEGER NOT NULL DEFAULT 0);
       CREATE TABLE IF NOT EXISTS sessions(hash TEXT PRIMARY KEY, wallet TEXT NOT NULL, expires INTEGER NOT NULL);
