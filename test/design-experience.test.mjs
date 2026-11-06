@@ -69,7 +69,8 @@ test('idle entry has one visible purpose heading and composer, with no empty pla
   assert.equal(h.get('assistant-task-slot').hidden, true);
   for (const id of starterIds) { assert.equal(visiblyPresent(h.get(id)), true); assert.equal(h.get(id).disabled, false); }
   assert.equal(h.document.querySelectorAll('#task-execution-column').length, 1);
-  assert.equal(h.document.querySelectorAll('[data-page]').length, 6);
+  assert.equal(h.document.querySelectorAll('[data-page]:not([data-page=admin])').length, 6);
+  assert.equal(h.get('admin-surface').hidden, true); assert.equal(h.get('admin-open').hidden, true);
 });
 
 for (const language of ['ko', 'en']) test(language + ' guest starters only fill the local draft, preserving scope and focusing the same composer', async () => {

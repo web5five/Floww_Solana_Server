@@ -21,6 +21,7 @@
     memory: [authored('YOUR CONTEXT'), authored('다음 대화에도 이어질 맥락.'), authored('직접 저장한 선호를 관리하고 대화마다 사용 여부를 정하세요.')],
     budgets: [authored('BOUNDED AUTHORITY'), authored('한도를 정하고, 흐름을 살피세요.'), authored('목적에 맞는 예산 권한과 예약·사용 내역을 확인하세요.')],
     activity: [authored('WORKSPACE ACTIVITY'), authored('변경의 흐름을 한눈에.'), authored('내 대화와 기억이 바뀐 시점을 확인하세요.')],
+    admin: [authored('admin.eyebrow'), authored('admin.overview'), authored('admin.description')],
   };
   const statuses = { CLARIFICATION_REQUIRED: authored('추가 정보 필요'), READY_TO_PLAN: authored('계획 작성 가능'), UNSUPPORTED: authored('범위 확인 필요'),
     REFINING: authored('목적 확인 중'), PLANNING: authored('계획 검토 중'), APPROVAL_REQUIRED: authored('계획 확인 필요'), TASK_CREATED: authored('작업 연결됨'),
@@ -209,8 +210,8 @@
     const doing = state.busy || state.taskBusy || state.routeLoading, locked = !state.wallet || doing;
     const taskControl = node => { for (let p = node; p; p = p.parentNode) if (p.id === 'task-execution-column') return true; return false; };
     // The mounted task keeps its own exact-quote/health/expiry controls.
-    for (const input of document.querySelectorAll('[data-page]:not([data-page=tasks]) input,[data-page]:not([data-page=tasks]) textarea,[data-page]:not([data-page=tasks]) select')) if (!taskControl(input)) input.disabled = locked;
-    for (const b of document.querySelectorAll('[data-page]:not([data-page=tasks]) button:not([data-go])')) if (!taskControl(b)) b.disabled = locked;
+    for (const input of document.querySelectorAll('[data-page]:not([data-page=tasks]):not([data-page=admin]) input,[data-page]:not([data-page=tasks]):not([data-page=admin]) textarea,[data-page]:not([data-page=tasks]):not([data-page=admin]) select')) if (!taskControl(input)) input.disabled = locked;
+    for (const b of document.querySelectorAll('[data-page]:not([data-page=tasks]):not([data-page=admin]) button:not([data-go])')) if (!taskControl(b)) b.disabled = locked;
     const c = state.conversation, immutable = Boolean(c?.linkedTaskId || c?.planLocked || c?.working), blocked = workspaceBlock();
     $('send-message').disabled = doing || immutable || !state.authReady || Boolean(state.wallet && blocked); $('message-text').disabled = doing || immutable;
     put($('send-message'), () => !state.authReady ? authored('연결 확인 중…') : !state.wallet ? authored(blocked ? '지갑 연결' : '지갑 연결하고 시작') : blocked ? authored(blocked === 'WORKSPACE_ADAPTER_UNAVAILABLE' ? 'adapter.sendUnavailable' : blocked === 'MODEL_NOT_CONFIGURED' ? 'adapter.sendConfiguration' : 'adapter.sendUnknown') : authored('보내기 ↑'));
@@ -434,6 +435,7 @@
   async function loadActivity() { const result = await api('/api/activity?limit=50'); state.activities = result.events; renderActivity(); }
   function renderActivity() { if (!state.activities.length) empty($('activity-list'), () => state.wallet ? authored('대화와 기억을 저장하면 활동 기록이 나타납니다.') : authored('지갑 로그인 후 내 활동 기록을 확인할 수 있습니다.')); else $('activity-list').replaceChildren(...activityRows(state.activities)); }
   function routeHash(route) {
+    if (route.view === 'admin') return '#/admin' + (route.section && route.section !== 'overview' ? '/' + route.section : '');
     if (route.view === 'assistant' && route.id) return '#/assistant/conversations/' + route.id.toLowerCase() + (route.step ? '/' + route.step : '');
     return '#/' + route.view + (route.view === 'tasks' && route.id ? '/' + route.id.toLowerCase() : '');
   }
@@ -441,6 +443,8 @@
     if (hash === '' || hash === '#') return { view: 'assistant' };
     const base = /^#\/(overview|assistant|tasks|memory|budgets|activity)\/?$/.exec(hash);
     if (base) return { view: base[1] };
+    const admin = /^#\/admin(?:\/(requests|events))?\/?$/.exec(hash);
+    if (admin) return { view: 'admin', ...(admin[1] ? { section: admin[1] } : {}) };
     const task = /^#\/tasks\/([a-f0-9-]+)\/?$/i.exec(hash);
     if (task && UUID.test(task[1])) return { view: 'tasks', id: task[1].toLowerCase() };
     const conversation = /^#\/assistant\/conversations\/([a-f0-9-]+)(?:\/(request|plan|payment|result))?\/?$/i.exec(hash);
@@ -488,9 +492,12 @@
     if (changed) { window.scrollTo({top:0,behavior:'instant'}); $('workspace-top').focus({preventScroll:true}); }
     document.querySelectorAll('[data-page]').forEach(n => { n.hidden = n.dataset.page !== name; });
     document.querySelectorAll('.shell-nav [data-view]').forEach(n => { if (n.dataset.view === name) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current'); });
-    ['view-eyebrow', 'view-title', 'view-description'].forEach((id, i) => put($(id), views[name][i]));
-    $('quick-new').hidden = name === 'assistant';
+    // These are fixed authored view labels, never an owner's conversation or
+    // Task content. Their locale bindings outlive authentication generations.
+    ['view-eyebrow', 'view-title', 'view-description'].forEach((id, i) => locale.text($(id), views[name][i]));
+    $('quick-new').hidden = name === 'assistant' || name === 'admin';
     renderGuidedTask(); controls();
+    window.dispatchEvent(new CustomEvent('floww:workspace-view', { detail: { view: name, section: state.route?.section ?? 'overview', routeVersion: state.routeVersion } }));
   }
   function focusNode(node) { if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '-1'); node.focus({ preventScroll: true }); node.scrollIntoView({ block: 'start', behavior: 'instant' }); }
   function focusRoute() {
@@ -603,7 +610,17 @@
     openRoute({ view: 'tasks', id: event.detail.id }, { taskRead: false });
   });
   document.querySelectorAll('.shell-nav button[data-view]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.view)));
-  document.querySelectorAll('[data-go]').forEach(n => n.addEventListener('click', () => navigate(n.dataset.go)));
+  document.querySelectorAll('[data-go]').forEach(n => n.addEventListener('click', event => {
+    if (n.tagName === 'A') {
+      if (event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+    }
+    return navigate(n.dataset.go);
+  }));
+  document.querySelectorAll('[data-admin-route]').forEach(n => n.addEventListener('click', event => {
+    if (event.button > 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault(); openRoute({ view: 'admin', ...(n.dataset.adminRoute !== 'overview' ? { section: n.dataset.adminRoute } : {}) });
+  }));
   $('quick-new').addEventListener('click', async () => { await navigate('assistant'); await run('workspace.createConversation', createConversation); });
   $('new-conversation').addEventListener('click', () => run('workspace.createConversation', createConversation));
   for (const [id, key] of [['suggest-wallet', 'design.requestSummary'], ['suggest-incoming', 'design.requestIncoming'], ['suggest-outgoing', 'design.requestOutgoing']]) {

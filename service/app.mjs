@@ -8,6 +8,7 @@ import { approve, assertApproval, attachQuote, canonical, makeTask, publicTask, 
 import { digest } from './store.mjs';
 import { createLifecycle } from './lifecycle.mjs';
 import { freezeAdapterStatus, UNAVAILABLE_ADAPTER_STATUS } from './adapter-preflight.mjs';
+import { mountAdmin } from './admin.mjs';
 
 const safeCode = (value, fallback = 'INTEGRATION_UNAVAILABLE') =>
   typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(value) ? value : fallback;
@@ -26,7 +27,7 @@ function checkSignature(wallet, message, encoded) {
     return verify(null, Buffer.from(message, 'utf8'), key, bytes);
   } catch { return false; }
 }
-export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness, lifecycle: suppliedLifecycle, observeRequest, adapterStatus: suppliedAdapterStatus }) {
+export function createApp({ config, store, gateway, ai, reportProvider, mountMerchant, mountWorkspace, taskHooks = {}, runtimeReadiness, lifecycle: suppliedLifecycle, observeRequest, telemetry, adminReader, adapterStatus: suppliedAdapterStatus }) {
   if (config.network !== DEVNET) fail('DEVNET_ONLY', 500);
   const app = express(), expectedHost = new URL(config.origin).host;
   // Unknown local capability is never silently promoted to ready. Direct
@@ -401,6 +402,7 @@ export function createApp({ config, store, gateway, ai, reportProvider, mountMer
     app.locals.merchant = mountMerchant(app, { config, reportProvider, receiptStore: store.receipts, trackWork: lifecycle.trackWork });
   }
   if (mountWorkspace) app.locals.workspace = mountWorkspace(routes, { config, store, auth, assertSession, now, respondTask, makeTask, withOperation, adapterStatus });
+  app.locals.admin = mountAdmin(routes, { config, store, auth, lifecycle, adapterStatus, telemetry, reader: adminReader });
   app.use(express.static(fileURLToPath(new URL('./web/', import.meta.url)), { index: 'index.html', etag: false, dotfiles: 'deny' }));
   app.use((req, res) => res.status(404).json({ error: { code: 'NOT_FOUND', requestId: req.requestId } }));
   app.use((error, req, res, next) => {

@@ -51,7 +51,7 @@ of security certification, accessibility conformance or a contractual SLA.
 ## Current iteration evidence
 
 The table's starting checkpoint is historical, not a list of features still
-absent. Released main `bac6419` includes the reviewed PR11–14 changes:
+absent. Released main `8a1ee3f` includes the reviewed PR11–15 changes:
 
 - P03–P06: dedicated DB/ledger readiness, bounded HTTP shutdown, merchant replay
   admission and redacted fixed-label diagnostics have implementation and
@@ -60,7 +60,7 @@ absent. Released main `bac6419` includes the reviewed PR11–14 changes:
   versioned scripted journey cases and purpose-led desktop/tablet/phone design
   are verified within the boundaries below. Voice, full keyboard/zoom coverage,
   actual-model quality and funded completion remain open.
-- P10: [PR14's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42249469866)
+- P10: [PR15's exact-source runtime CI](https://github.com/web5five/Floww_Solana_Server/actions/runs/42254690342)
   passed both required PostgreSQL/runtime/Python checks and an actual non-root,
   network-isolated image check. It did not deploy a public service.
 
@@ -95,10 +95,20 @@ Drafts, exact retry identities, current-owner state and keyboard focus have
 dedicated race coverage and native-browser readback. No route authorizes a
 financial operation or creates a replacement request.
 
-Remaining product work includes voice input, broader administrative audit
-presentation, actual-model quality acceptance, approved public-demo
+Remaining product work includes the full voice-agent screen and chat microphone,
+actual-model quality acceptance, approved public-demo
 acceptance and separately approved wallet/funded Devnet completion. None is
 closed by the above test counts.
+
+The administrator follow-up implements a separate read-only operations console,
+with joint-state payment/delivery attention, independent source freshness,
+bounded HTTP charts and usable retained-record tables. Real PostgreSQL and
+file-SQLite projections, authorization/resource races and native desktop/390px
+KO/EN behavior have acceptance evidence in [VERIFICATION.md](VERIFICATION.md).
+Its default administrator list remains empty; generated test identities do not
+establish actual operator access. [ADMIN.md](ADMIN.md) defines the data and live
+enablement boundary. [VOICE.md](VOICE.md) preserves the complete original voice
+scope and its still-open microphone/provider acceptance.
 
 The adapter follow-up adds one bounded, cached offline packaging check for the
 configured Python workspace/report adapters. Known failure blocks new model

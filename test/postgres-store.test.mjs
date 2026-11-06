@@ -10,7 +10,11 @@ import { rootCertificates } from 'node:tls';
 import path from 'node:path';
 import pg from 'pg';
 import { PostgresStore } from '../service/postgres-store.mjs';
-import { ServiceError } from '../service/config.mjs';
+import { ServiceError, loadConfig } from '../service/config.mjs';
+import { WorkspaceStore } from '../service/workspace-store.mjs';
+import { createMandateService } from '../service/mandates.mjs';
+import { createLifecycle } from '../service/lifecycle.mjs';
+import { createAdminReader } from '../service/admin-reader.mjs';
 
 const exec = promisify(execFile);
 let cluster, first, second, now = Date.now(), unavailable;
@@ -435,4 +439,86 @@ real('PostgreSQL task workspace authority is immutable under rejected or async m
   await assert.rejects(second.mutate(value.id, value.owner, task => { task.workspaceContext.planHash = 'changed'; }), { code: 'TASK_IDENTITY_CHANGED' });
   await assert.rejects(second.mutate(value.id, value.owner, task => { task.workspaceContext = undefined; }), { code: 'TASK_IDENTITY_CHANGED' });
   assert.equal((await first.get(value.id, value.owner)).workspaceContext.planHash, 'a'.repeat(64));
+});
+real('PostgreSQL operator projection uses real read-only transactions without changing Task facts', async () => {
+  await WorkspaceStore.open(first); await createMandateService({ store: first, config: loadConfig({}) });
+  const wallet = owner(), value = task(wallet), at = new Date(now).toISOString();
+  Object.assign(value, { policy: 'ALLOW', payment: 'CONFIRMED', delivery: 'FAILED', purpose: 'private admin projection purpose',
+    signedData: { paymentHeader: 'private admin projection proof' }, events: [{ at, type: 'TASK_CREATED', code: 'PRIVATE_DIAGNOSTIC' }] });
+  await first.add(value);
+  const day = at.slice(0, 10), payer = 'owned-scripted-admin-payer-' + randomUUID();
+  await first.pool.query('INSERT INTO floww_runtime.workspace_budget_buckets(payer,day,owner,data) VALUES($1,$2,$3,$4)',
+    [payer, day, '*', JSON.stringify({ executionsHeld: 2, executionsSpent: 3, heldAtomic: '0', spentAtomic: '0' })]);
+  await first.pool.query('INSERT INTO floww_runtime.workspace_budget_buckets(payer,day,owner,data) VALUES($1,$2,$3,$4)',
+    [payer, day, wallet, JSON.stringify({ executionsHeld: 2, executionsSpent: 3, heldAtomic: '0', spentAtomic: '0' })]);
+  const before = await first.pool.query('SELECT revision,data FROM floww_runtime.tasks WHERE id=$1', [value.id]);
+  let connects = 0, releases = 0, readonly;
+  const store = new PostgresStore({ async connect() {
+    connects++; const client = await first.pool.connect();
+    return { async query(text, values) {
+      const result = await client.query(text, values);
+      if (text.startsWith('BEGIN TRANSACTION')) readonly = (await client.query('SHOW transaction_read_only')).rows[0].transaction_read_only;
+      if (text === "SET LOCAL statement_timeout='750ms'") assert.equal((await client.query('SHOW statement_timeout')).rows[0].statement_timeout, '750ms');
+      return result;
+    }, release(error) { releases++; client.release(error); } };
+  } }, clock), life = createLifecycle({ probe: async () => ({ databaseReady: true, ledgerReady: true }) });
+  try {
+    const reader = createAdminReader({ store, lifecycle: life, clock });
+    const [a, b] = await Promise.all([reader.snapshot(), reader.snapshot()]);
+    assert.equal(a, b); assert.equal(connects, 1); assert.equal(releases, 1); assert.equal(readonly, 'on');
+    assert.ok(Object.values(a).every(source => source.status === 'ready'));
+    assert.ok(a.tasks.data.attention.confirmedUndelivered >= 1);
+    assert.ok(a.events.data.some(event => event.event === 'TASK_CREATED' && event.reason === 'OTHER' && event.payment === 'CONFIRMED'));
+    assert.deepEqual(a.executions.data.days.at(-1), { day, heldExecutions: 2, observedExecutions: 3 });
+    assert.doesNotMatch(JSON.stringify(a), /private admin projection|PRIVATE_DIAGNOSTIC|paymentHeader|Atomic/);
+    assert.deepEqual((await first.pool.query('SELECT revision,data FROM floww_runtime.tasks WHERE id=$1', [value.id])).rows, before.rows);
+    assert.equal(life.counts().work, 0);
+  } finally { await life.whenIdle(); await first.pool.query('DELETE FROM floww_runtime.workspace_budget_buckets WHERE payer=$1', [payer]); }
+});
+real('PostgreSQL operator lock timeout is server-enforced, isolated per source and releases its connection', async () => {
+  await WorkspaceStore.open(first); await createMandateService({ store: first, config: loadConfig({}) });
+  const lock = await first.pool.connect(), life = createLifecycle({ probe: async () => ({ databaseReady: true, ledgerReady: true }) });
+  try {
+    await lock.query('BEGIN'); await lock.query('LOCK TABLE floww_runtime.tasks IN ACCESS EXCLUSIVE MODE');
+    const started = performance.now(), reader = createAdminReader({ store: first, lifecycle: life, clock });
+    const result = await reader.snapshot();
+    assert.equal(result.tasks.code, 'ADMIN_SOURCE_TIMEOUT'); assert.equal(result.events.code, 'ADMIN_SOURCE_TIMEOUT');
+    assert.equal(result.usage.status, 'ready'); assert.equal(result.executions.status, 'ready');
+    assert.ok(performance.now() - started < 1900); await life.whenIdle();
+    assert.equal(first.pool.waitingCount, 0);
+    const clients = await first.pool.query("SELECT count(*) AS n FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='idle in transaction' AND query='ROLLBACK'");
+    assert.equal(Number(clients.rows[0].n), 0);
+  } finally { await lock.query('ROLLBACK'); lock.release(); await life.whenIdle(); }
+});
+real('PostgreSQL invalid execution counts become unavailable instead of false zero totals', async () => {
+  await WorkspaceStore.open(first); await createMandateService({ store: first, config: loadConfig({}) });
+  const payer = 'owned-scripted-invalid-admin-' + randomUUID(), day = new Date(now).toISOString().slice(0, 10);
+  const life = createLifecycle({ probe: async () => ({ databaseReady: true, ledgerReady: true }) });
+  try {
+    await first.pool.query('INSERT INTO floww_runtime.workspace_budget_buckets(payer,day,owner,data) VALUES($1,$2,$3,$4)',
+      [payer, day, '*', JSON.stringify({ executionsHeld: -1, executionsSpent: 0, heldAtomic: '0', spentAtomic: '0' })]);
+    const result = await createAdminReader({ store: first, lifecycle: life, clock }).snapshot();
+    assert.equal(result.executions.code, 'ADMIN_SOURCE_UNAVAILABLE'); assert.equal('data' in result.executions, false);
+    assert.equal(result.tasks.status, 'ready'); assert.equal(result.usage.status, 'ready');
+  } finally { await life.whenIdle(); await first.pool.query('DELETE FROM floww_runtime.workspace_budget_buckets WHERE payer=$1', [payer]); }
+});
+real('PostgreSQL actual slow read is cancelled by the owned statement budget and later sources recover', async () => {
+  await WorkspaceStore.open(first); await createMandateService({ store: first, config: loadConfig({}) });
+  let releases = 0, cancelled;
+  const store = new PostgresStore({ async connect() {
+    const client = await first.pool.connect();
+    return { async query(text, values) {
+      if (text.includes('count(*) AS n')) {
+        try { return await client.query('SELECT pg_sleep(2)'); }
+        catch (error) { cancelled = error.code; throw error; }
+      }
+      return client.query(text, values);
+    }, release(error) { releases++; client.release(error); } };
+  } }, clock), life = createLifecycle({ probe: async () => ({ databaseReady: true, ledgerReady: true }) });
+  const started = performance.now();
+  const result = await createAdminReader({ store, lifecycle: life, clock }).snapshot();
+  await life.whenIdle();
+  assert.equal(cancelled, '57014'); assert.equal(result.tasks.code, 'ADMIN_SOURCE_TIMEOUT');
+  assert.equal(result.usage.status, 'ready'); assert.equal(result.executions.status, 'ready'); assert.equal(result.events.status, 'ready');
+  assert.equal(releases, 1); assert.ok(performance.now() - started >= 700); assert.ok(performance.now() - started < 1900);
 });

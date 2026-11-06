@@ -294,6 +294,62 @@ asserts both capabilities through default startup instead of running a second
 independent import probe. Its passing result must still be read from exact-source
 CI; no local host test is described as container acceptance.
 
+## Read-only administrator console — 2026-11-07
+
+The controller reread original source77127 and inspected existing telemetry and
+persisted records before generating the dashboard reference. The implementation
+uses the shipped team mark and puts payment/delivery attention before graphs and
+logs. [ADMIN.md](ADMIN.md) defines the projections, authority and data limits;
+[VOICE.md](VOICE.md) separately preserves the complete voice requirement.
+
+- Final full Node suite: **486 passed, zero failed/skipped**, with required
+  isolated PostgreSQL checks enabled. Python: **209 passed** earlier in this
+  iteration; its source is unchanged. The final browser-client set has192
+  cases, including54 administrator checks. Syntax/whitespace/NFC checks cover86
+  files; workflow lint and Git whitespace checks pass. The last table-only CSS
+  alignment change passed static checks and native readback after this suite;
+  it changed no JavaScript or data behavior.
+- The backend's109-case subset includes28 real owned-PostgreSQL checks. Actual
+  READ ONLY transactions,750ms statement cancellation,200ms lock timeout,
+  savepoint partial-source recovery, single-flight cleanup and unsafe counters
+  were exercised. Actual file-SQLite checks cover BigInt counts, immutable
+  persisted bytes/revisions, file identity, a held lock and worker exit after
+  timeout. No managed database session was killed and no schema was changed.
+- Generated Ed25519 operator/ordinary identities exercised actual HTTP wallet
+  authentication and read-only file-SQLite projections. Seven controlled Tasks
+  produced7 stored/1 unresolved/1 confirmed-undelivered/1 delivered-without-report.
+  All four administrator GETs returned200; ordinary access/overview returned403
+  and guests401. Private sentinels and full Task IDs were absent from the DTOs.
+  No external model, RPC, signing or redemption port was called. These controlled
+  financial states are not actual settlement or delivery evidence.
+- Native1280×720 and390×844 KO/EN readback covered source timestamps, partial
+  failure, refresh, event/current-state captions and text/table alternatives.
+  An unavailable request source retained healthy Task metrics and valid role;
+  an unavailable Task source displayed unconfirmed dashes. Ordinary/guest gates
+  cleared data, and return/Back preserved the consumer draft and same Task.
+  Switching language left observed API calls at51 before/after, with zero POSTs.
+- Native acceptance found and fixed stale translated shared headings after
+  authentication, enlarged chart swatches and over-tall mobile log rows. Final
+  desktop metrics end at637px within a720px first viewport. Legend swatches are
+  9×10px. The390px log has47px rows, a bounded internal scroll region, five
+  semantic column headers, native keyboard horizontal/vertical scrolling and
+  sticky headers. Full36-character correlation IDs fit at the right edge;
+  page width remains375/375px. The temporary viewport and fixture tab were reset
+  and closed. These visual checks do not claim complete WCAG conformance.
+- The actual managed-PostgreSQL loopback preview was gracefully drained and
+  restarted on the candidate source. Page/liveness/readiness returned200,
+  readiness was true, both local adapter capabilities were true, and private
+  Task/administrator routes returned401. Payments remain disabled and the
+  administrator allowlist remains empty. This proves neither live operator
+  activation, actual Phantom acceptance nor model-provider availability.
+
+Independent review covered the frozen backend/UI hashes and final native
+screenshots. The generated concept, exact prompt/provenance, sanitized HTTP and
+browser observations and final images are retained outside Git in the local
+GWDC evidence directory. Actual operator access still needs a user-designated
+address and real wallet acceptance; no generated identity is promoted to that
+role. Exact head, required CI and merge binding are recorded with the release.
+
 ## Required external gates
 
 The runtime workflow tests the actual Node 24 deployment image as a non-root

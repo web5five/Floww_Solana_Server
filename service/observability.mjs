@@ -11,6 +11,7 @@ const routes = new Map([
   ...['messages', 'plan', 'confirm'].map(action => ['/api/conversations/:id/' + action, 'conversation_' + action]),
   ['/api/memories', 'memories'], ['/api/memories/:id', 'memory_detail'],
   ['/api/mandates', 'mandates'], ['/api/mandates/:id/revoke', 'mandate_revoke'],
+  ...['access', 'overview', 'events', 'requests'].map(action => ['/api/admin/' + action, 'admin_' + action]),
   ['/merchant/reports/:resourceId', 'merchant_report'],
 ]);
 const methods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
@@ -22,11 +23,26 @@ const defaultWrite = line => {
   return process.stdout.write(line);
 };
 
-export function createRequestTelemetry({ write = defaultWrite, clock = () => performance.now(), maxLogsPerMinute = 600 } = {}) {
-  if (typeof write !== 'function' || typeof clock !== 'function' || !Number.isInteger(maxLogsPerMinute) ||
+export const TELEMETRY_ROUTES = Object.freeze([...new Set([...routes.values(), 'unclassified'])]);
+export const TELEMETRY_METHODS = Object.freeze([...methods, 'OTHER']);
+export function createRequestTelemetry({ write = defaultWrite, clock = () => performance.now(), wallClock = Date.now, maxLogsPerMinute = 600 } = {}) {
+  if (typeof write !== 'function' || typeof clock !== 'function' || typeof wallClock !== 'function' || !Number.isInteger(maxLogsPerMinute) ||
       maxLogsPerMinute < 0 || maxLogsPerMinute > 10_000) throw new Error('INVALID_TELEMETRY_CONFIGURATION');
   const seen = new WeakSet(), counts = new Map(), latency = buckets.map(() => 0);
   let completed = 0, incomplete = 0, suppressed = 0, unmeasuredLatency = 0, windowStart = 0, written = 0;
+  const recent = [], minutes = new Map();
+  let unmeasuredTime = 0, clockRegressions = 0, retainedAway = 0;
+  const epoch = () => {
+    try { const value = wallClock(); return Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000 ? value : null; }
+    catch { return null; }
+  };
+  const startedEpoch = epoch(); let lastEpoch = startedEpoch;
+  const wallTime = () => {
+    const value = epoch();
+    if (value !== null && lastEpoch !== null && value < lastEpoch) { clockRegressions = add(clockRegressions); return null; }
+    if (value !== null) lastEpoch = value;
+    return value;
+  };
   const time = () => {
     try { const value = clock(); return Number.isFinite(value) && value >= 0 ? value : null; }
     catch { return null; }
@@ -67,6 +83,16 @@ export function createRequestTelemetry({ write = defaultWrite, clock = () => per
         latency[bucket] = add(latency[bucket]);
       }
       emit({ event: 'http_request', requestId: id, method, route, status, outcome, durationMs });
+      const at = wallTime();
+      if (at === null) unmeasuredTime = add(unmeasuredTime);
+      else {
+        const minute = Math.floor(at / 60_000) * 60_000;
+        const current = minutes.get(minute) ?? { completed: 0, incomplete: 0 };
+        current[outcome] = add(current[outcome]); minutes.set(minute, current);
+        for (const key of minutes.keys()) if (key < minute - 59 * 60_000) minutes.delete(key);
+      }
+      recent.push({ at: at === null ? null : new Date(at).toISOString(), requestId: id, method, route, status, outcome, durationMs });
+      if (recent.length > 200) { recent.shift(); retainedAway = add(retainedAway); }
     };
     res.once('finish', () => finish(true));
     res.once('close', () => finish(res.writableFinished === true));
@@ -74,5 +100,22 @@ export function createRequestTelemetry({ write = defaultWrite, clock = () => per
   return Object.freeze({ observeRequest,
     snapshot: () => ({ completed, incomplete, suppressed, unmeasuredLatency, counts: Object.fromEntries(counts),
       latencyBuckets: buckets.map((upperMs, index) => ({ upperMs, count: latency[index] })) }),
+    operatorSnapshot() {
+      const at = wallTime();
+      if (startedEpoch === null || at === null || at < startedEpoch) throw new Error('ADMIN_CLOCK_UNAVAILABLE');
+      const minute = Math.floor(at / 60_000) * 60_000;
+      const first = Math.max(Math.floor(startedEpoch / 60_000) * 60_000, minute - 59 * 60_000);
+      for (const key of minutes.keys()) if (key < first) minutes.delete(key);
+      return { startedAt: new Date(startedEpoch).toISOString(), completed, incomplete, suppressed, unmeasuredLatency,
+        unmeasuredTime, clockRegressions,
+        counts: [...counts].map(([key, count]) => { const [method, route, statusClass] = key.split(':'); return { method, route, statusClass, count }; }),
+        latencyBuckets: buckets.map((upperMs, index) => ({ upperMs, count: latency[index] })),
+        minuteWindowFrom: new Date(Math.max(startedEpoch, first)).toISOString(), minuteWindowThrough: new Date(at).toISOString(),
+        minuteBuckets: Array.from({ length: (minute - first) / 60_000 + 1 }, (_, i) => {
+          const key = first + i * 60_000; return { minute: new Date(key).toISOString(), ...(minutes.get(key) ?? { completed: 0, incomplete: 0 }) };
+        }),
+        requests: recent.slice().reverse().map(record => ({ ...record })), retainedAway,
+      };
+    },
   });
 }

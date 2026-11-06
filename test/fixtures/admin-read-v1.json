@@ -1,0 +1,295 @@
+{
+  "evidence": "Scripted API contract values; not live financial/model evidence",
+  "access": {
+    "role": "ADMIN_READ",
+    "expiresAt": "2026-11-07T12:00:00.000Z"
+  },
+  "overview": {
+    "version": "admin-read/v1",
+    "generatedAt": "2026-11-07T03:02:30.000Z",
+    "sources": {
+      "runtime": {
+        "status": "ready",
+        "capturedAt": "2026-11-07T03:02:30.000Z",
+        "scope": "current-process",
+        "data": {
+          "startedAt": "2026-11-07T03:02:30.000Z",
+          "completed": 3,
+          "incomplete": 0,
+          "suppressed": 0,
+          "unmeasuredLatency": 0,
+          "unmeasuredTime": 0,
+          "clockRegressions": 0,
+          "counts": [
+            {
+              "method": "GET",
+              "route": "tasks",
+              "statusClass": "2xx",
+              "count": 2
+            },
+            {
+              "method": "GET",
+              "route": "tasks",
+              "statusClass": "4xx",
+              "count": 1
+            }
+          ],
+          "latencyBuckets": [
+            {
+              "upperMs": 10,
+              "count": 3
+            },
+            {
+              "upperMs": 50,
+              "count": 0
+            },
+            {
+              "upperMs": 100,
+              "count": 0
+            },
+            {
+              "upperMs": 250,
+              "count": 0
+            },
+            {
+              "upperMs": 500,
+              "count": 0
+            },
+            {
+              "upperMs": 1000,
+              "count": 0
+            },
+            {
+              "upperMs": 2500,
+              "count": 0
+            },
+            {
+              "upperMs": 5000,
+              "count": 0
+            },
+            {
+              "upperMs": 15000,
+              "count": 0
+            },
+            {
+              "upperMs": 60000,
+              "count": 0
+            },
+            {
+              "upperMs": null,
+              "count": 0
+            }
+          ],
+          "minuteWindowFrom": "2026-11-07T03:02:30.000Z",
+          "minuteWindowThrough": "2026-11-07T03:02:30.000Z",
+          "minuteBuckets": [
+            {
+              "minute": "2026-11-07T03:02:00.000Z",
+              "completed": 3,
+              "incomplete": 0
+            }
+          ],
+          "countersCapped": false,
+          "capabilities": {
+            "workspaceAdapterReady": true,
+            "reportAdapterReady": true,
+            "modelConfigured": false,
+            "paymentEnabled": false
+          },
+          "draining": false
+        }
+      },
+      "tasks": {
+        "status": "ready",
+        "capturedAt": "2026-11-07T03:02:30.000Z",
+        "scope": "current-persisted-task-states",
+        "data": {
+          "total": 7,
+          "active": 6,
+          "archived": 1,
+          "reportAvailable": 1,
+          "recoveryRequired": 5,
+          "attention": {
+            "unresolvedPayments": 3,
+            "confirmedUndelivered": 1,
+            "deliveredWithoutReport": 1
+          },
+          "policy": {
+            "PENDING": 1,
+            "ALLOW": 6,
+            "DENY": 0,
+            "OTHER": 0
+          },
+          "payment": {
+            "NOT_STARTED": 1,
+            "SIGNING": 1,
+            "PENDING": 1,
+            "UNKNOWN": 1,
+            "CONFIRMED": 3,
+            "FAILED": 0,
+            "OTHER": 0
+          },
+          "delivery": {
+            "NOT_STARTED": 2,
+            "PENDING": 2,
+            "COMPLETED": 2,
+            "FAILED": 1,
+            "OTHER": 0
+          },
+          "coverage": {
+            "archivedIncluded": true,
+            "invalidStateTasks": 0,
+            "invalidReportShapes": 0
+          }
+        }
+      },
+      "usage": {
+        "status": "ready",
+        "capturedAt": "2026-11-07T03:02:30.000Z",
+        "scope": "last-seven-utc-days-admitted-role-calls",
+        "data": {
+          "days": [
+            {
+              "day": "2026-11-01",
+              "admittedRoleCalls": 0
+            },
+            {
+              "day": "2026-11-02",
+              "admittedRoleCalls": 0
+            },
+            {
+              "day": "2026-11-03",
+              "admittedRoleCalls": 0
+            },
+            {
+              "day": "2026-11-04",
+              "admittedRoleCalls": 0
+            },
+            {
+              "day": "2026-11-05",
+              "admittedRoleCalls": 0
+            },
+            {
+              "day": "2026-11-06",
+              "admittedRoleCalls": 0
+            },
+            {
+              "day": "2026-11-07",
+              "admittedRoleCalls": 3
+            }
+          ],
+          "limitPerDay": 60
+        }
+      },
+      "executions": {
+        "status": "ready",
+        "capturedAt": "2026-11-07T03:02:30.000Z",
+        "scope": "last-seven-utc-days-global-ledger-buckets",
+        "data": {
+          "days": [
+            {
+              "day": "2026-11-01",
+              "heldExecutions": 0,
+              "observedExecutions": 0
+            },
+            {
+              "day": "2026-11-02",
+              "heldExecutions": 0,
+              "observedExecutions": 0
+            },
+            {
+              "day": "2026-11-03",
+              "heldExecutions": 0,
+              "observedExecutions": 0
+            },
+            {
+              "day": "2026-11-04",
+              "heldExecutions": 0,
+              "observedExecutions": 0
+            },
+            {
+              "day": "2026-11-05",
+              "heldExecutions": 0,
+              "observedExecutions": 0
+            },
+            {
+              "day": "2026-11-06",
+              "heldExecutions": 0,
+              "observedExecutions": 0
+            },
+            {
+              "day": "2026-11-07",
+              "heldExecutions": 2,
+              "observedExecutions": 1
+            }
+          ],
+          "coverage": "global ledger buckets"
+        }
+      }
+    }
+  },
+  "events": {
+    "status": "ready",
+    "capturedAt": "2026-11-07T03:02:30.000Z",
+    "scope": "newest-retained-task-events",
+    "data": {
+      "events": [
+        {
+          "at": "2026-11-07T03:02:30.000Z",
+          "taskRef": "task_ae1908d5eef6",
+          "event": "TASK_CREATED",
+          "reason": "QUOTE_REQUIRED",
+          "policy": "ALLOW",
+          "payment": "CONFIRMED",
+          "delivery": "COMPLETED"
+        }
+      ],
+      "hasMore": false,
+      "retention": "up to 100 retained events per Task",
+      "stateScope": "current-task-state",
+      "taskCapturedAt": "2026-11-07T03:02:30.000Z"
+    }
+  },
+  "requests": {
+    "status": "ready",
+    "capturedAt": "2026-11-07T03:02:30.000Z",
+    "scope": "current-process",
+    "data": {
+      "requests": [
+        {
+          "at": "2026-11-07T03:02:30.000Z",
+          "requestId": "12345678-1234-1234-1234-123456789abc",
+          "method": "GET",
+          "route": "tasks",
+          "status": 401,
+          "outcome": "completed",
+          "durationMs": 0
+        },
+        {
+          "at": "2026-11-07T03:02:30.000Z",
+          "requestId": "12345678-1234-1234-1234-123456789abc",
+          "method": "GET",
+          "route": "tasks",
+          "status": 200,
+          "outcome": "completed",
+          "durationMs": 0
+        },
+        {
+          "at": "2026-11-07T03:02:30.000Z",
+          "requestId": "12345678-1234-1234-1234-123456789abc",
+          "method": "GET",
+          "route": "tasks",
+          "status": 200,
+          "outcome": "completed",
+          "durationMs": 0
+        }
+      ],
+      "hasMore": false,
+      "retention": "latest 200 this-process observations",
+      "retained": 3,
+      "truncated": false,
+      "dropped": 0,
+      "unmeasuredTime": 0
+    }
+  }
+}

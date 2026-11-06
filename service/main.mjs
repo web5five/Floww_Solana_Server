@@ -54,7 +54,7 @@ export async function buildRuntime(input = {}) {
   const workspace = await WorkspaceStore.open(store);
   const mandates = await createMandateService({ store, config });
   const telemetry = createRequestTelemetry({ write: input.writeLog });
-  const app = createApp({ config, store, gateway, reportProvider, ai, adapterStatus, mountMerchant: input.mountMerchant ?? mountMerchant,
+  const app = createApp({ config, store, gateway, reportProvider, ai, adapterStatus, telemetry, mountMerchant: input.mountMerchant ?? mountMerchant,
     observeRequest: input.observeRequest ?? telemetry.observeRequest,
     mountWorkspace: (app, context) => mountWorkspace(app, { repo: workspace, planner, mandates }, context),
     runtimeReadiness: () => mandates.readiness(),
