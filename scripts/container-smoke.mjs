@@ -21,6 +21,13 @@ try {
   const health = await (await fetch(origin + '/api/health')).json();
   assert.equal(health.databaseReady, true); assert.equal(health.ready, false);
   assert.equal(health.paymentEnabled, false); assert.equal(health.modelConfigured, false);
+  assert.equal((await fetch(origin + '/livez')).status, 200);
+  const readiness = await fetch(origin + '/readyz');
+  assert.equal(readiness.status, 200);
+  assert.equal((await readiness.json()).ready, true, 'Disabled payments must not invalidate service readiness');
   assert.equal((await runtime.planner.plan({})).code, 'MODEL_NOT_CONFIGURED');
   process.stdout.write('Non-root image: Node/Python imports, workspace, private routes and disabled payment guards verified.\n');
-} finally { await runtime.close(); }
+} finally {
+  const closed = await runtime.close();
+  assert.equal(closed.drained, true); assert.equal(closed.storeClosed, true);
+}

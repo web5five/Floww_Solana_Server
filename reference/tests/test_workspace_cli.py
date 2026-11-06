@@ -249,6 +249,67 @@ class WorkspaceRoleTests(unittest.TestCase):
                 data["messages"].append({"id": "reply", "role": "assistant", "text": "관찰 범위를 확인했습니다."})
                 self.assertEqual(run("plan", data, ScriptedModel(planned(data), critic(data)))["status"], "PROPOSED")
 
+    def test_unresolved_explicit_window_correction_cannot_reuse_previous_scope(self):
+        for phrase in ("조회 기간을 지난 나흘로 바꿔 주세요.", "기간을 어제로 변경해 주세요.",
+                       "Change the observation window to yesterday.", "Update my report period to last month.",
+                       "조회 기간을 2026-11-04T12:00:00Z로 수정해 주세요."):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertIsNone(anchors["windowStart"]); self.assertIsNone(anchors["windowEnd"])
+                self.assertEqual(anchors["wallet"], WALLET)
+                model = ScriptedModel(refined(data))
+                self.assertEqual(run("refine", data, model)["status"], "STOPPED")
+                self.assertEqual(len(model.calls), 1)
+                clarification = refined(data, status="CLARIFICATION_REQUIRED",
+                    assistantText="시작과 종료 UTC 시간을 입력하거나 지원하는 하나의 기간을 알려 주세요.")
+                clarification["intent"].update(windowStart=None, windowEnd=None,
+                    missingFields=["windowStart", "windowEnd"])
+                result = run("refine", data, ScriptedModel(clarification))
+                self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
+                data["intent"] = result["intent"]
+                model = ScriptedModel()
+                self.assertEqual(run("plan", data, model)["status"], "STOPPED")
+                self.assertEqual(model.calls, [])
+
+    def test_unresolved_explicit_wallet_correction_does_not_use_history_or_memory(self):
+        for phrase in ("지갑을 프로필의 다른 주소로 바꿔 주세요.", "주소를 invalid-wallet로 수정해 주세요.",
+                       "Change my wallet to the one I mentioned before.", "Replace the address with my preferred one."):
+            with self.subTest(phrase=phrase):
+                data = payload()
+                data["messages"].insert(0, {"id": "earlier-wallet", "role": "user", "text": "Use " + OTHER})
+                data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertIsNone(anchors["wallet"])
+                self.assertEqual(anchors["windowStart"], "2026-11-05T12:00:00.000Z")
+                self.assertEqual(run("refine", data, ScriptedModel(refined(data)))["status"], "STOPPED")
+                clarification = refined(data, status="CLARIFICATION_REQUIRED", assistantText="분석할 지갑 주소를 입력해 주세요.")
+                clarification["intent"].update(wallet=None, missingFields=["wallet"])
+                result = run("refine", data, ScriptedModel(clarification))
+                self.assertEqual(result["status"], "CLARIFICATION_REQUIRED")
+                self.assertEqual(set(result), {"status", "assistantText", "intent", "executionKind", "modelVersion", "promptVersion"})
+                self.assertIsNone(result["intent"]["wallet"])
+
+    def test_resolved_corrections_and_explicit_scope_preservation_keep_working(self):
+        for phrase, wallet, start in (
+            ("조회 기간을 최근 사흘로 바꿔 주세요.", WALLET, "2026-11-03T12:00:00.000Z"),
+            ("Change the observation window to last 2 days.", WALLET, "2026-11-04T12:00:00.000Z"),
+            ("지갑을 " + OTHER + "로 바꿔 주세요.", OTHER, "2026-11-05T12:00:00.000Z"),
+            ("Change my wallet to " + OTHER + ".", OTHER, "2026-11-05T12:00:00.000Z"),
+            ("조회 기간을 그대로 두고 답변만 한국어로 바꿔 주세요.", WALLET, "2026-11-05T12:00:00.000Z"),
+            ("조회 기간을 변경하지 말고 답변만 한국어로 바꿔 주세요.", WALLET, "2026-11-05T12:00:00.000Z"),
+            ("조회 기간을 설명하는 문체를 바꿔 주세요.", WALLET, "2026-11-05T12:00:00.000Z"),
+            ("Keep my wallet and change the summary language to Korean.", WALLET, "2026-11-05T12:00:00.000Z"),
+            ("Change the wallet report language to Korean.", WALLET, "2026-11-05T12:00:00.000Z"),
+        ):
+            with self.subTest(phrase=phrase):
+                data = payload(); data["messages"][-1]["text"] = phrase
+                anchors = normalize(data)["explicitScopeAnchors"]
+                self.assertEqual(anchors["wallet"], wallet); self.assertEqual(anchors["windowStart"], start)
+                response = refined(data); response["intent"].update(anchors)
+                result = run("refine", data, ScriptedModel(response))
+                self.assertEqual(result["status"], "READY_TO_PLAN")
+
     def test_korean_named_scope_stays_frozen_for_planning_and_style_only_followup(self):
         for word, days in (("하루", 1), ("이틀", 2), ("사흘", 3), ("일주일", 7)):
             with self.subTest(word=word):

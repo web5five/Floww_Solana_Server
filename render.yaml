@@ -10,7 +10,7 @@ services:
     autoDeployTrigger: 'off'
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /api/health
+    healthCheckPath: /readyz
     envVars:
       - key: FLOWW_DEPLOYMENT_MODE
         value: remote

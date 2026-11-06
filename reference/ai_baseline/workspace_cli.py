@@ -98,6 +98,19 @@ _NAMED_CONTINUATION = re.compile(
     r"(?:그리고|및|또한|또는|혹은|아니면|내지|하고|와|과|더하기|플러스)(?=$|\W)")
 _DURATION = re.compile(r"(?:\b\d{1,2}\s*(?:hours?|days?)\b|(?<!\d)\d{1,2}\s*(?:시간|일|분)|하루|이틀|사흘|일주일)", re.I)
 _REPLACEMENT = re.compile(r"^[\s,，;；:：]*(?:(?:은|는|이|가|을|를|만)\s*)?(?:아니라|아니고|아닌|말고|대신)[\s,，;；:：]*$")
+_SCOPE_FIELDS_KO = {
+    "wallet": r"(?:지갑(?:\s*주소)?|주소)",
+    "window": r"(?:(?:조회|관찰|분석)\s*(?:기간|범위)|기간|날짜|시간\s*범위)",
+}
+_SCOPE_FIELDS_EN = {"wallet": r"(?:wallet|address)", "window": r"(?:window|period|date(?:s)?|time\s+range|scope)"}
+_CHANGE_KO = r"(?:바꿔|바꾸|바꿀|변경|수정|정정|교체)"
+_KEEP_KO = re.compile(r"^\s*(?:은|는|을|를)?\s*(?:그대로|유지|고정|변경하지|바꾸지)")
+_STYLE_KO = re.compile(r"(?:답변|문체|언어|형식|표현|목적|설명|요약)(?:만|을|를|은|는|으로|로)")
+_SCOPE_UPDATES = {key: (
+    re.compile(r"(?P<field>" + field + r")(?P<tail>\s*(?:을|를)\s*[^.!?\n]{0,80}?" + _CHANGE_KO + r"|\s*" + _CHANGE_KO + r")"),
+    re.compile(r"\b(?:change|switch|replace|update|correct)\s+(?:(?:the|my|this|current|observation|query|report|analysis|data)\s+){0,4}"
+        + _SCOPE_FIELDS_EN[key] + r"\b(?=\s*(?:$|[.!?:;]|(?:to|with|from|for)\b))", re.I),
+) for key, field in _SCOPE_FIELDS_KO.items()}
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
@@ -174,6 +187,19 @@ def _selected_relative(text, relative):
     return relative[1] if _REPLACEMENT.fullmatch(between) else None
 
 
+def _scope_update(text, field):
+    """Recognize bounded explicit correction commands, never interpret their value."""
+    korean, english = _SCOPE_UPDATES[field]
+    if english.search(text):
+        return True
+    for match in korean.finditer(text):
+        tail = match["tail"]
+        # Preserving the scope while changing presentation is a style-only turn.
+        if not _KEEP_KO.match(text[match.end("field"):]) and not _STYLE_KO.search(tail):
+            return True
+    return False
+
+
 def _intent(raw, *, output=False):
     if raw is None:
         raw = dict.fromkeys(SCOPE_FIELDS, None) | {"missingFields": list(SCOPE_FIELDS)}
@@ -217,6 +243,8 @@ def _anchors(messages, intent, now, operation):
             wallets = list(dict.fromkeys(value for value in _WALLET.findall(text) if _wallet(value)))
             if wallets:
                 wallet, wallet_seen = (wallets[0] if len(wallets) == 1 else None), True
+            elif _scope_update(text, "wallet"):
+                wallet, wallet_seen = None, True
         if not window_seen:
             dates = _ISO.findall(text)
             relative = list(_RELATIVE.finditer(text))
@@ -237,6 +265,11 @@ def _anchors(messages, intent, now, operation):
                 else:
                     start = (now - delta).isoformat(timespec="milliseconds").replace("+00:00", "Z")
                     end = now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+                window_seen = True
+            elif _scope_update(text, "window"):
+                # An explicit but unresolved correction cannot inherit yesterday's
+                # snapshot. Ask for a supported period or exact UTC form values.
+                start = end = None
                 window_seen = True
         # The server snapshot already incorporates previous turns and explicit
         # form edits. Older history must not undo it when the latest turn only

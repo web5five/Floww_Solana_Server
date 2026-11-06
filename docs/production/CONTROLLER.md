@@ -9,6 +9,13 @@ The `feature/goal-first-experience` follow-up applies Geondong's request to
 reflect the earlier product/UX discussions. See [EXPERIENCE.md](EXPERIENCE.md)
 for source attribution, implemented behavior and acceptance boundaries.
 
+Latest scope clarification: this is a hackathon entry with production-level
+quality, not an always-on production service. Continue comparing the earlier
+product and last verified checkpoint, then improve complete user journeys,
+grounded answers, security, recovery and demo stability. The acceptance ledger
+is [READINESS.md](READINESS.md); paid hosting and enterprise operational SLAs are
+outside its completion criteria.
+
 ## Product outcome
 
 One authenticated workspace connects conversational intent, explicit plans,

@@ -12,6 +12,8 @@ import { createPlanner } from './planner.mjs';
 import { WorkspaceStore } from './workspace-store.mjs';
 import { mountWorkspace } from './workspace.mjs';
 import { createMandateService } from './mandates.mjs';
+import { createRequestTelemetry } from './observability.mjs';
+import { createShutdown } from './lifecycle.mjs';
 
 export function readPayerKey(path) {
   let fd;
@@ -45,7 +47,9 @@ export async function buildRuntime(input = {}) {
   const planner = input.planner ?? createPlanner({ python: config.python, model: config.model, apiKey: config.apiKey });
   const workspace = await WorkspaceStore.open(store);
   const mandates = await createMandateService({ store, config });
+  const telemetry = createRequestTelemetry({ write: input.writeLog });
   const app = createApp({ config, store, gateway, reportProvider, ai, mountMerchant: input.mountMerchant ?? mountMerchant,
+    observeRequest: input.observeRequest ?? telemetry.observeRequest,
     mountWorkspace: (app, context) => mountWorkspace(app, { repo: workspace, planner, mandates }, context),
     runtimeReadiness: () => mandates.readiness(),
     taskHooks: {
@@ -54,25 +58,33 @@ export async function buildRuntime(input = {}) {
       observed: ({ task, owner }) => mandates.observe(owner, task),
     },
   });
-  return { app, config, store, gateway, reportProvider, ai, planner, workspace, mandates };
+  return { app, config, store, gateway, reportProvider, ai, planner, workspace, mandates, telemetry, lifecycle: app.locals.lifecycle };
 }
 export async function start(input = {}) {
   const runtime = await buildRuntime(input);
   const server = createServer(runtime.app);
   server.requestTimeout = 90_000; server.headersTimeout = 15_000; server.keepAliveTimeout = 5_000;
-  await new Promise((resolve, reject) => {
-    server.once('error', reject); server.listen(runtime.config.port, runtime.config.host, resolve);
-  });
-  return { ...runtime, server, close: async () => {
-    server.closeIdleConnections(); await new Promise(resolve => server.close(resolve)); await runtime.store.close();
-  } };
+  const close = createShutdown({ server, store: runtime.store, lifecycle: runtime.lifecycle,
+    graceMs: input.shutdownGraceMs, storeCloseMs: input.storeCloseMs });
+  try {
+    await new Promise((resolve, reject) => {
+      server.once('error', reject); server.listen(runtime.config.port, runtime.config.host, resolve);
+    });
+  } catch (error) { await runtime.store.close(); throw error; }
+  return { ...runtime, server, close };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   start().then(runtime => {
     // No environment dump, private key, proof or merchant response is logged.
     process.stdout.write('Floww service started.\n');
     let closing = false;
-    const close = async () => { if (closing) return; closing = true; await runtime.close(); };
+    const close = async () => {
+      if (closing) return; closing = true;
+      try {
+        const result = await runtime.close();
+        if (!result.drained || !result.storeClosed) { process.stderr.write('FLOWW_DRAIN_INCOMPLETE\n'); process.exitCode = 1; }
+      } catch { process.stderr.write('FLOWW_DRAIN_FAILED\n'); process.exitCode = 1; }
+    };
     process.once('SIGTERM', close); process.once('SIGINT', close);
   }).catch(() => { process.stderr.write('FLOWW_START_FAILED\n'); process.exitCode = 1; });
 }

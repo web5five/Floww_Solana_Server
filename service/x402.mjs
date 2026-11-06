@@ -428,8 +428,17 @@ export function createGateway(config, dependencies = {}) {
   return { readiness, quote, sign, redeem, reconcile };
 }
 
-export function mountMerchant(app, { config, reportProvider, receiptStore, fetch: fetchImpl = fetch, rpc, facilitator } = {}) {
+export function mountMerchant(app, { config, reportProvider, receiptStore, fetch: fetchImpl = fetch, rpc, facilitator,
+  trackWork = action => action() } = {}) {
   let server, initialized;
+  const activeLimit = config.maxConcurrentOperations ?? 4;
+  if (!Number.isInteger(activeLimit) || activeLimit < 1 || activeLimit > 32) fail('INVALID_MERCHANT_LIMIT');
+  if (typeof trackWork !== 'function') fail('MERCHANT_NOT_CONFIGURED');
+  let active = 0;
+  // This is bounded, process-local admission only. Durable proof ownership still
+  // starts after verification/report preparation; unverified input cannot claim it.
+  const activeProofs = new Set();
+  const busy = res => res.set('Retry-After', '1').status(429).json({ reasonCode: 'MERCHANT_BUSY' });
   const gateway = createGateway(config, { fetch: fetchImpl, rpc });
   function resourceServer() {
     if (!server) {
@@ -446,10 +455,15 @@ export function mountMerchant(app, { config, reportProvider, receiptStore, fetch
     await initialized;
     return value;
   }
-  app.get('/merchant/reports/:resourceId', async (req, res) => {
+  // A closed HTTP socket does not finish settlement or durable bookkeeping.
+  // Keep the complete handler visible to shutdown until that work has settled.
+  app.get('/merchant/reports/:resourceId', (req, res) => trackWork(async () => {
     res.set('cache-control', 'private, no-store');
+    if (active >= activeLimit) return busy(res);
+    active++;
+    let activeProofKey;
     const reportController = new AbortController();
-    let reportTimer;
+    let reportTimer, reportWork;
     const abortReport = () => reportController.abort();
     const onClose = () => { if (!res.writableFinished) abortReport(); };
     req.once('aborted', abortReport);
@@ -465,21 +479,28 @@ export function mountMerchant(app, { config, reportProvider, receiptStore, fetch
     try {
       reportTimer = setTimeout(abortReport, timeoutMs(config));
       const url = resourceURL(`${new URL(config.merchantOrigin).origin}${req.originalUrl}`, config);
+      const header = req.get('payment-signature');
+      let payload;
+      if (header) {
+        if (header.length > MAX_PROOF) fail('INVALID_PAYMENT_PROOF');
+        try { payload = validatePaymentPayload(decodePaymentSignatureHeader(header)); }
+        catch { fail('INVALID_PAYMENT_PROOF'); }
+        // Key the temporary lease by actual message bytes, so re-encoding the
+        // same signed proof cannot multiply facilitator or provider work.
+        const proofKey = hash(`${url}\n${hash(decodeWire(payload.payload?.transaction).messageBytes)}`);
+        if (activeProofs.has(proofKey)) return busy(res);
+        activeProofs.add(proofKey); activeProofKey = proofKey;
+      }
       const sdk = await initialize();
       const requirements = await sdk.buildPaymentRequirements({ scheme: 'exact', network: DEVNET,
         price: { amount: config.amountAtomic, asset: config.asset, extra: { decimals: config.assetDecimals } },
         payTo: config.merchantPayTo, maxTimeoutSeconds: 120, extra: { memo: memoFor(url) } });
       const paymentRequired = await sdk.createPaymentRequiredResponse(requirements,
         { url, description: 'Wallet transfer report', mimeType: 'application/json' });
-      const header = req.get('payment-signature');
       if (!header) {
         res.set('payment-required', encodePaymentRequiredHeader(paymentRequired));
         return res.status(402).json({ reasonCode: 'PAYMENT_REQUIRED' });
       }
-      if (header.length > MAX_PROOF) fail('INVALID_PAYMENT_PROOF');
-      let payload;
-      try { payload = validatePaymentPayload(decodePaymentSignatureHeader(header)); }
-      catch { fail('INVALID_PAYMENT_PROOF'); }
       const matched = sdk.findMatchingRequirements(paymentRequired.accepts, payload);
       if (!matched || payload.resource?.url !== url) fail('PAYMENT_BINDING_MISMATCH');
       const quoted = { resourceUrl: url, requirements: payload.accepted, paymentRequired };
@@ -503,11 +524,12 @@ export function mountMerchant(app, { config, reportProvider, receiptStore, fetch
       if (!verified.isValid) return res.status(402).json({ reasonCode: 'PAYMENT_REJECTED' });
       assertActiveReport();
       const parsed = new URL(url);
-      const report = await cancellableReport(Promise.resolve().then(() => reportProvider({
+      reportWork = Promise.resolve().then(() => reportProvider({
         resourceRef: `urn:floww:report:${req.params.resourceId}`, wallet: parsed.searchParams.get('wallet'),
         windowStart: parsed.searchParams.get('start'), windowEnd: parsed.searchParams.get('end'),
         signal: reportController.signal,
-      })), reportController.signal);
+      }));
+      const report = await cancellableReport(reportWork, reportController.signal);
       assertActiveReport();
       const body = typeof report === 'string' ? report : JSON.stringify(report);
       if (!body || Buffer.byteLength(body) > MAX_BODY) fail('INVALID_REPORT');
@@ -536,7 +558,14 @@ export function mountMerchant(app, { config, reportProvider, receiptStore, fetch
       const code = error instanceof GatewayError ? error.code : 'MERCHANT_UNAVAILABLE';
       if (res.destroyed) return;
       return res.status(code.startsWith('INVALID_') || code.startsWith('UNAPPROVED_') || code === 'PAYMENT_BINDING_MISMATCH' ? 400 : 503).json({ reasonCode: code });
-    } finally { cleanupReport(); }
-  });
+    } finally {
+      cleanupReport();
+      // Cancellation can win the response race while a provider unwinds. Hold
+      // both the temporary admission and shutdown lease until it really stops.
+      await reportWork?.catch(() => {});
+      if (activeProofKey) activeProofs.delete(activeProofKey);
+      active--;
+    }
+  }));
   return { initialize };
 }
