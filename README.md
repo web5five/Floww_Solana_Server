@@ -1,6 +1,32 @@
 # Floww_Solana_Server
 Backend, AI orchestration, authorization policies and Solana x402 integration.
 
+## Encode Solana Hackathon
+
+Floww lets a person review the exact scope and price of an agent's data
+purchase. The first resource is a wallet-transfer report from Solana Devnet.
+
+| Submission item | Link |
+| --- | --- |
+| Working Devnet demo | [Floww](https://floww-solana.onrender.com) |
+| Demo video (2:34) | [English walkthrough](https://drive.google.com/file/d/1_YC0rVRToZj7ORRTnaoq_nF6OMY2Zp8I/view) |
+| Confirmed settlement | [Solana Explorer](https://explorer.solana.com/tx/5DfTv8pYo1Eu8p7GGKHe9DaKmNgTJLekWYQghwUBa9VAENxtwjiWTctgfM2JTCH23ErYwdz9CM9ADoQfTk6HSMia?cluster=devnet) |
+| Deployed source | [Commit ecb5068](https://github.com/web5five/Floww_Solana_Server/tree/ecb506812188fbe540cf041423b7bf6da1fba54d) |
+
+The hosted acceptance used a scripted client with a real Ed25519 test key and
+an explicit report request. The operator approved an HTTP 402 quote for 0.001
+Devnet USDC. Solana recorded the settlement and the same Task returned the
+report. The original proof recovered
+the same report after a restart. A repeat execution returned HTTP 409 with
+unchanged balances. The public demo has a 0.001 Devnet USDC daily service-payer
+cap. The [actual model evaluation](docs/production/AI_QUALITY.md) ran separately.
+
+The earlier GWDC Floww supplied the product concept, branding, and approval and
+outcome-tracking patterns. This hackathon entry adds the Solana workspace and
+signed login, x402 SVM settlement and proof-based recovery, and the Devnet
+wallet-transfer report. See the [comparison](docs/production/COMPARISON.md)
+for the implementation boundaries.
+
 ## Integration service
 
 The `service/` runtime adds signed wallet login, private persistent tasks, exact
