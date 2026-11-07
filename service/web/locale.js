@@ -2,6 +2,15 @@
 (() => {
   'use strict';
   const COPY = {
+  "purchase.status": ["구매 처리 상태", "Purchase status"],
+  "purchase.approval": ["사용자 승인", "User approval"],
+  "purchase.policy": ["서버 정책 검증", "Server policy check"],
+  "purchase.recorded": ["승인 기록 있음", "Approval recorded"],
+  "purchase.revoked": ["승인 취소", "Approval revoked"],
+  "purchase.awaiting": ["승인 대기", "Awaiting approval"],
+  "purchase.approvedBudget": ["승인한 지출 한도", "Approved spending limit"],
+  "purchase.draftBudget": ["입력한 지출 한도", "Entered spending limit"],
+  "purchase.taskId": ["작업 ID", "Task ID"],
   "lifecycle.checking": ["로그인 확인 중", "Checking your session"],
   "lifecycle.checkingCopy": ["현재 로그인 상태를 확인한 뒤 화면을 엽니다.", "Your workspace opens after your current session is checked."],
   "lifecycle.unavailable": ["로그인을 확인하지 못했습니다. 연결을 다시 확인해 주세요.", "Your session could not be verified. Check the connection again to continue."],

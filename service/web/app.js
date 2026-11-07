@@ -235,7 +235,7 @@
     clearNotice();
     for (const id of ['result-content', 'timeline', 'quote-details', 'task-list']) $(id).replaceChildren();
     put($('result-empty').querySelector('p'), () => authored('자료 전달이 확인되면') + ' ' + authored('분석 결과가 여기에 나타납니다.'));
-    for (const id of ['task-meta', 'quote-price', 'quote-atomic', 'quote-parties', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) put($(id), () => '');
+    for (const id of ['task-meta', 'purchase-task-ref', 'quote-budget-label', 'quote-budget', 'purchase-approval-state', 'quote-price', 'quote-atomic', 'quote-parties', 'proposal-note', 'approval-status', 'action-status', 'transaction-link', 'task-guidance']) put($(id), () => '');
     put($('execution-title'), () => authored('선택한 요청')); $('transaction-link').removeAttribute('href');
   }
   function clearSession() {
@@ -344,6 +344,23 @@
   function quoteDetail(label, value) {
     return [element('dt', () => label), element('dd', () => value || authored('설정 대기'))];
   }
+  function renderBudget(task) {
+    const { quote, approval } = task;
+    if (!quote) return;
+    const approved = task.policy === 'ALLOW' && approval && approval.quoteHash === quote.hash &&
+      !approval.revoked && (liveApproval(task) || !untouched(task));
+    put($('quote-budget-label'), () => authored(approved ? 'purchase.approvedBudget' : 'purchase.draftBudget'));
+    put($('quote-budget'), () => {
+      if (approved) return amountDisplay(approval.budgetAtomic, quote.assetDecimals) + authored(' 토큰');
+      const budget = $('budget').value;
+      try {
+        const atomic = window.FlowwUnits.parse(budget, quote.assetDecimals);
+        return amountDisplay(atomic, quote.assetDecimals) + authored(' 토큰');
+      } catch {
+        return authored('금액 확인 필요');
+      }
+    });
+  }
   function renderQuote(task) {
     const quote = task.quote;
     $('quote-summary').hidden = !quote;
@@ -430,9 +447,13 @@
     $('selection-content').dataset.resultReady = String(Boolean(task?.result?.answer));
     if (!task) return;
     put($('execution-title'), () => task.purpose);
+    put($('purchase-task-ref'), () => authored('purchase.taskId') + ' · ' + task.id);
     put($('task-meta'), () => short(task.wallet, 8) + ' · ' + dateText(task.windowStart) + ' – ' + dateText(task.windowEnd));
     const status = taskSummary(task);
     put($('task-state'), () => status.text); $('task-state').className = 'state-pill ' + status.className;
+    const approval = task.approval;
+    put($('purchase-approval-state'), () => authored(approval?.revoked ? 'purchase.revoked' :
+      task.policy === 'ALLOW' && approval && (liveApproval(task) || !untouched(task)) ? 'purchase.recorded' : 'purchase.awaiting'));
     put($('policy-state'), () => policyNames[task.policy] ?? authored('확인 필요'));
     put($('payment-state'), () => paymentNames[task.payment] ?? authored('확인 필요'));
     put($('delivery-state'), () => deliveryNames[task.delivery] ?? authored('확인 필요'));
@@ -456,6 +477,7 @@
     put($('task-guidance'), () => guidance(task));
     const status = taskSummary(task);
     put($('task-state'), () => status.text); $('task-state').className = 'state-pill ' + status.className;
+    renderBudget(task);
     const notStarted = untouched(task);
     $('quote-task').hidden = !notStarted;
     put($('quote-task'), () => task.quote ? authored('결제 조건 다시 확인') : authored('결제 조건 확인'));

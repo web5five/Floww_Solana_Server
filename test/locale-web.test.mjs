@@ -132,6 +132,9 @@ test('same-task chat and report wrappers translate while exact amounts, evidence
   assert.equal(h.get('approval-ack').checked, true);
   assert.match(h.get('quote-price').textContent, /9007199\.254740993/);
   assert.match(h.get('quote-atomic').textContent, /9007199254740993/);
+  assert.equal(h.get('quote-budget-label').textContent, 'Entered spending limit');
+  assert.match(h.get('quote-budget').textContent, /^9999999\.000000001\b/);
+  assert.equal(h.get('purchase-task-ref').textContent, 'Task ID · ' + TASK_A);
   assert.match(h.get('execution-title').textContent, /사용자가 한국어로 적은 목적/);
   assert.match(h.get('dialogue-messages').textContent, /사용자가 남긴 대화 원문/);
   assert.match(h.get('plan-content').textContent, /모델의 계획 원문/);
@@ -150,6 +153,8 @@ for (const reason of ['BUDGET_DENIED', 'UNAUTHORIZED_PAYMENT_TERMS', 'DAILY_BUDG
   assert.match(h.get('task-state').textContent, /거부됨/); assert.match(h.get('journey-title').textContent, /거부됨/);
   await switchTo(h, 'en');
   assert.match(h.get('task-state').textContent, /denied/i); assert.match(h.get('journey-title').textContent, /denied/i);
+  assert.equal(h.get('purchase-approval-state').textContent, 'Awaiting approval');
+  assert.equal(h.get('quote-budget-label').textContent, 'Entered spending limit');
   if (reason === 'BUDGET_DENIED') assert.match(h.get('task-guidance').textContent, /below the price or exceeds the service limit/);
   if (reason === 'UNAUTHORIZED_PAYMENT_TERMS') assert.match(h.get('task-guidance').textContent, /recipient/i);
   if (reason === 'DAILY_BUDGET_EXCEEDED') assert.match(h.get('task-guidance').textContent, /daily/i);
