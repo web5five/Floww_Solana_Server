@@ -25,3 +25,33 @@ label{display:block;font-size:14px;font-weight:600;margin-bottom:9px;color:#4654
 #admin-attention-title,#admin-requests-title,#admin-events-title{scroll-margin-top:104px}.admin-chart{display:block}.admin-state-legend dt>.admin-swatch{display:block;width:9px;height:10px;min-width:9px;max-width:9px;max-height:10px;flex:0 0 9px;margin-top:3px}
 
 .admin-chart-values>summary{font-size:13px;min-height:44px;display:flex;align-items:center;color:var(--muted);cursor:pointer}.admin-chart-values .admin-table-wrap{max-height:320px}.admin-chart-values .admin-table{min-width:0;font-size:12px}.admin-chart-values .admin-table td,.admin-chart-values .admin-table th{padding:10px}
+
+/* Keep the approval and the actual purchase outcome readable side by side. */
+.purchase-amounts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.purchase-amounts .quote-price {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#quote-budget { color: var(--ink); }
+.purchase-state-panel .section-heading { margin-bottom: 12px; }
+.purchase-state-panel .state-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding-top: 0;
+}
+.purchase-outcomes { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+#assistant-task-slot #selection-content[data-result-ready=true] .purchase-outcomes { order: -1; }
+.task-execution-home #selection-content[data-result-ready=true] .results-grid { order: 0; }
+.task-execution-home { container-type: inline-size; }
+@container (min-width: 740px) {
+  .task-execution-home #selection-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}

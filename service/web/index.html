@@ -180,12 +180,11 @@
 
         <div id="selection-content" hidden>
           <section class="panel execution-panel" aria-labelledby="execution-title">
-            <div class="execution-heading"><div><p class="eyebrow"><span data-copy="CURRENT REQUEST">CURRENT REQUEST</span></p><h2 id="execution-title"><span data-copy="선택한 요청">선택한 요청</span></h2></div><span id="task-state" class="state-pill"><span data-copy="대기">대기</span></span></div>
+            <div class="execution-heading"><div><p class="eyebrow"><span data-copy="CURRENT REQUEST">CURRENT REQUEST</span></p><h2 id="execution-title"><span data-copy="선택한 요청">선택한 요청</span></h2></div></div>
             <p id="task-meta" class="task-meta"></p>
-            <div class="state-grid" aria-label="승인, 결제, 자료 전달 상태" data-copy-aria-label="승인, 결제, 자료 전달 상태"><div><span class="tiny-label"><span data-copy="권한 확인">권한 확인</span></span><strong id="policy-state"><span data-copy="대기">대기</span></strong></div><div><span class="tiny-label"><span data-copy="결제">결제</span></span><strong id="payment-state"><span data-copy="시작 전">시작 전</span></strong></div><div><span class="tiny-label"><span data-copy="자료 전달">자료 전달</span></span><strong id="delivery-state"><span data-copy="시작 전">시작 전</span></strong></div></div>
-            <p id="task-guidance" class="guidance"></p>
-            <div id="quote-summary" class="quote-summary" hidden><div class="quote-price"><span class="tiny-label"><span data-copy="이 자료의 결제 금액">이 자료의 결제 금액</span></span><strong id="quote-price"></strong><details class="payment-details"><summary><span data-copy="거래 세부 조건">거래 세부 조건</span></summary><span id="quote-atomic" class="muted"></span></details></div><p id="quote-parties" class="task-meta"></p><details class="payment-details"><summary><span data-copy="수신자와 토큰 전체 주소 확인">수신자와 토큰 전체 주소 확인</span></summary><dl id="quote-details" class="details-grid"></dl></details></div>
+            <div id="quote-summary" class="quote-summary" hidden><div class="purchase-amounts"><div class="quote-price"><span class="tiny-label"><span data-copy="이 자료의 결제 금액">이 자료의 결제 금액</span></span><strong id="quote-price"></strong></div><div class="quote-price"><span id="quote-budget-label" class="tiny-label"></span><strong id="quote-budget"></strong></div></div><details class="payment-details"><summary><span data-copy="거래 세부 조건">거래 세부 조건</span></summary><span id="quote-atomic" class="muted"></span></details><p id="quote-parties" class="task-meta"></p><details class="payment-details"><summary><span data-copy="수신자와 토큰 전체 주소 확인">수신자와 토큰 전체 주소 확인</span></summary><dl id="quote-details" class="details-grid"></dl></details></div>
             <div id="proposal-note" class="proposal-note" hidden></div>
+            <p id="purchase-task-ref" class="task-meta"></p>
 
             <form id="approval-form" class="approval-form" hidden>
               <div class="section-heading"><h3><span data-copy="결제 조건 승인">결제 조건 승인</span></h3></div>
@@ -198,10 +197,17 @@
             <p id="action-status" class="action-status" aria-live="polite"></p>
           </section>
 
-          <div class="results-grid">
+          <div class="purchase-outcomes">
+            <section class="panel purchase-state-panel" aria-labelledby="purchase-state-title">
+              <div class="section-heading"><h3 id="purchase-state-title" data-copy="purchase.status">구매 처리 상태</h3><span id="task-state" class="state-pill"><span data-copy="대기">대기</span></span></div>
+              <div class="state-grid" aria-label="구매 처리 상태" data-copy-aria-label="purchase.status"><div><span class="tiny-label" data-copy="purchase.approval">사용자 승인</span><strong id="purchase-approval-state"></strong></div><div><span class="tiny-label"><span data-copy="purchase.policy">서버 정책 검증</span></span><strong id="policy-state"><span data-copy="대기">대기</span></strong></div><div><span class="tiny-label"><span data-copy="결제">결제</span></span><strong id="payment-state"><span data-copy="시작 전">시작 전</span></strong></div><div><span class="tiny-label"><span data-copy="자료 전달">자료 전달</span></span><strong id="delivery-state"><span data-copy="시작 전">시작 전</span></strong></div></div>
+              <p id="task-guidance" class="guidance"></p>
+            </section>
+            <div class="results-grid">
             <section class="panel result-panel" aria-labelledby="result-title"><div class="section-heading result-heading"><h2 id="result-title"><span data-copy="분석 결과">분석 결과</span></h2><button id="download-report" class="text-button" type="button" hidden><span data-copy="보고서 저장 ↓">보고서 저장 ↓</span></button></div><div id="result-empty" class="result-empty"><span aria-hidden="true">≋</span><p><span data-copy="자료 전달이 확인되면">자료 전달이 확인되면</span><br><span data-copy="분석 결과가 여기에 나타납니다.">분석 결과가 여기에 나타납니다.</span></p></div><div id="result-content" hidden></div></section>
             <details class="timeline-details"><summary><span data-copy="실행 기록과 영수증 보기">실행 기록과 영수증 보기</span></summary><section class="panel timeline-panel" aria-labelledby="timeline-title"><div class="section-heading"><h2 id="timeline-title"><span data-copy="실행 기록">실행 기록</span></h2></div><ol id="timeline" class="timeline"></ol><div id="transaction-wrap" class="transaction-wrap" hidden><span class="tiny-label"><span data-copy="확인된 거래">확인된 거래</span></span><a id="transaction-link" target="_blank" rel="noopener noreferrer"></a></div></section></details>
 
+            </div>
           </div>
         </div>
       </section></div>
