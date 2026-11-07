@@ -35,7 +35,9 @@ export class GatewayError extends Error {
 }
 const fail = (code) => { throw new GatewayError(code); };
 const hash = (value) => createHash('sha256').update(value).digest('hex');
-const memoFor = (url) => `floww:${hash(url)}`;
+// Preserve the full digest within the SDK's fixed Solana compute budget.
+const memoFor = (url) => createHash('sha256').update(url).digest('base64url');
+const legacyMemoFor = (url) => `floww:${hash(url)}`;
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const knownAddress = (value) => typeof value === 'string' && isAddress(value);
 const signatureOK = (value) => {
@@ -85,13 +87,14 @@ function resourceURL(input, config) {
   return url.href;
 }
 
-function validateRequirements(requirements, url, config) {
+function validateRequirements(requirements, url, config, { allowLegacyMemo = false } = {}) {
+  const memo = requirements?.extra?.memo;
   if (!requirements || requirements.scheme !== 'exact' || requirements.network !== DEVNET ||
       requirements.asset !== config.asset || requirements.payTo !== config.merchantPayTo ||
       requirements.amount !== config.amountAtomic ||
       !Number.isInteger(requirements.maxTimeoutSeconds) || requirements.maxTimeoutSeconds < 1 ||
       requirements.maxTimeoutSeconds > 300 || !knownAddress(requirements.extra?.feePayer) ||
-      requirements.extra?.memo !== memoFor(url) ||
+      (memo !== memoFor(url) && !(allowLegacyMemo && memo === legacyMemoFor(url))) ||
       (requirements.extra?.paymentFlow !== undefined && requirements.extra.paymentFlow !== 'authorization') ||
       (requirements.extra?.assetTransferMethod !== undefined && requirements.extra.assetTransferMethod !== 'default')) {
     fail('UNAPPROVED_PAYMENT_TERMS');
@@ -211,8 +214,8 @@ async function ata(owner, mint, tokenProgram) {
   return address;
 }
 
-async function inspectTransaction(transaction, requirements, url, config, expectedPayer) {
-  validateRequirements(requirements, url, config);
+async function inspectTransaction(transaction, requirements, url, config, { expectedPayer, allowLegacyMemo = false } = {}) {
+  validateRequirements(requirements, url, config, { allowLegacyMemo });
   let instructions, compiled;
   try {
     compiled = getCompiledTransactionMessageDecoder().decode(transaction.messageBytes);
@@ -231,7 +234,7 @@ async function inspectTransaction(transaction, requirements, url, config, expect
       data.length !== 10 || data[0] !== 12 || data.readBigUInt64LE(1).toString() !== requirements.amount ||
       data[9] !== config.assetDecimals || transfer.accounts?.length !== 4 ||
       memo.programAddress !== MEMO_PROGRAM_ADDRESS || (memo.accounts?.length ?? 0) !== 0 ||
-      new TextDecoder('utf-8', { fatal: true }).decode(memo.data) !== memoFor(url)) fail('UNAPPROVED_INSTRUCTIONS');
+      !Buffer.from(memo.data ?? []).equals(Buffer.from(requirements.extra.memo))) fail('UNAPPROVED_INSTRUCTIONS');
   const [source, mint, destination, authority] = transfer.accounts.map((account) => account.address);
   if (!knownAddress(authority) || (expectedPayer && authority !== expectedPayer) || mint !== requirements.asset ||
       source !== await ata(authority, mint, transfer.programAddress) ||
@@ -251,7 +254,7 @@ async function inspectProof(header, quote, config) {
       !isDeepStrictEqual(payload.accepted, quote.requirements) ||
       Object.keys(payload.extensions ?? {}).length !== 0) fail('PAYMENT_BINDING_MISMATCH');
   const transaction = decodeWire(payload.payload.transaction);
-  const details = await inspectTransaction(transaction, payload.accepted, quote.resourceUrl, config);
+  const details = await inspectTransaction(transaction, payload.accepted, quote.resourceUrl, config, { allowLegacyMemo: true });
   const payerSignature = transaction.signatures[details.payer];
   if (!payerSignature || payerSignature.length !== 64) fail('INVALID_PAYER_SIGNATURE');
   const publicKey = createPublicKey({ format: 'der', type: 'spki', key: Buffer.concat([
@@ -337,7 +340,7 @@ export function createGateway(config, dependencies = {}) {
         signTransactions: async (transactions, options) => {
           if (!active) fail('SIGNING_DEADLINE_EXCEEDED');
           if (transactions.length !== 1) fail('UNAPPROVED_INSTRUCTIONS');
-          await inspectTransaction(transactions[0], quoted.requirements, url, config, key.address);
+          await inspectTransaction(transactions[0], quoted.requirements, url, config, { expectedPayer: key.address });
           await beforeSign();
           if (!active) fail('SIGNING_DEADLINE_EXCEEDED');
           return key.signTransactions(transactions, options);
@@ -491,10 +494,12 @@ export function mountMerchant(app, { config, reportProvider, receiptStore, fetch
         if (activeProofs.has(proofKey)) return busy(res);
         activeProofs.add(proofKey); activeProofKey = proofKey;
       }
+      const legacyMemo = payload?.accepted?.extra?.memo === legacyMemoFor(url);
+      const memo = legacyMemo ? payload.accepted.extra.memo : memoFor(url);
       const sdk = await initialize();
       const requirements = await sdk.buildPaymentRequirements({ scheme: 'exact', network: DEVNET,
         price: { amount: config.amountAtomic, asset: config.asset, extra: { decimals: config.assetDecimals } },
-        payTo: config.merchantPayTo, maxTimeoutSeconds: 120, extra: { memo: memoFor(url) } });
+        payTo: config.merchantPayTo, maxTimeoutSeconds: 120, extra: { memo } });
       const paymentRequired = await sdk.createPaymentRequiredResponse(requirements,
         { url, description: 'Wallet transfer report', mimeType: 'application/json' });
       if (!header) {
@@ -520,6 +525,8 @@ export function mountMerchant(app, { config, reportProvider, receiptStore, fetch
         res.set('payment-response', encodePaymentResponseHeader(cached.response));
         return res.type('application/json').send(cached.body);
       }
+      // Old proofs may retrieve a recorded receipt, but cannot start settlement.
+      if (legacyMemo) fail('UNAPPROVED_PAYMENT_TERMS');
       const verified = await sdk.verifyPayment(payload, matched);
       if (!verified.isValid) return res.status(402).json({ reasonCode: 'PAYMENT_REJECTED' });
       assertActiveReport();

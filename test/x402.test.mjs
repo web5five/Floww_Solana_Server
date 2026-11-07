@@ -2,14 +2,16 @@
 // These tests are not evidence of external Solana settlement.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import express from 'express';
 import {
   createKeyPairSignerFromBytes, getBase58Decoder, getBase64EncodedWireTransaction,
   getSignatureFromTransaction, getTransactionDecoder,
 } from '@solana/kit';
 import { decodePaymentSignatureHeader, encodePaymentRequiredHeader, encodePaymentSignatureHeader } from '@x402/core/http';
+import { x402Client } from '@x402/core/client';
 import { TOKEN_PROGRAM_ADDRESS } from '@x402/svm';
+import { ExactSvmScheme as ExactSvmClient } from '@x402/svm/exact/client';
 import { createGateway, mountMerchant, DEVNET } from '../service/x402.mjs';
 import { createApp } from '../service/app.mjs';
 import { createLifecycle, createShutdown } from '../service/lifecycle.mjs';
@@ -164,7 +166,7 @@ async function environment(t, opts = {}) {
   else mount(app, { config, receiptStore, reportProvider });
   const store = { close() { storeState.closed = true; storeState.closes++; storeClosed.resolve(); } };
   const url = `${origin}/merchant/reports/purchase-1?wallet=${payer.address}&start=2026-11-01T00%3A00%3A00.000Z&end=2026-11-02T00%3A00%3A00.000Z`;
-  return { app, server, config, url, gateway, counts, chain, records, payer, rpc, lifecycle, store, storeState, storeClosed,
+  return { app, server, config, url, gateway, counts, chain, records, payer, rpc, facilitator, lifecycle, store, storeState, storeClosed,
     reportEntered, reportAborted, settleEntered, settlementCompleted, claimEntered, pendingPutEntered,
     settledPutEntered, settledPutCompleted,
     setGenesis(value) { genesis = value; }, setDecimals(value) { decimals = value; } };
@@ -176,6 +178,8 @@ test('real SDK 402 -> partial signing -> scripted settlement -> bound resource a
   assert.equal(quoted.paymentRequired.x402Version, 2);
   assert.equal(quoted.requirements.network, DEVNET);
   assert.equal(quoted.requirements.amount, '1000');
+  assert.equal(quoted.requirements.extra.memo, createHash('sha256').update(e.url).digest('base64url'));
+  assert.equal(Buffer.byteLength(quoted.requirements.extra.memo), 43);
   let checked = 0;
   const signed = await e.gateway.sign(quoted, { beforeSign: async () => { checked++; } });
   assert.equal(checked, 1);
@@ -191,6 +195,45 @@ test('real SDK 402 -> partial signing -> scripted settlement -> bound resource a
   assert.equal(recovered.payment, 'CONFIRMED');
   assert.equal(recovered.body, result.body);
   assert.equal(e.counts.settle, 1);
+});
+
+test('old hex memo proofs can recover an existing receipt but cannot start payment', async (t) => {
+  const e = await environment(t);
+  const current = await e.gateway.quote(e.url);
+  const requirements = { ...current.requirements, extra: { ...current.requirements.extra,
+    memo: 'floww:' + createHash('sha256').update(e.url).digest('hex') } };
+  const paymentRequired = { ...current.paymentRequired, accepts: [requirements] };
+  const quoted = { ...current, requirements, paymentRequired };
+  await assert.rejects(e.gateway.sign(quoted, { beforeSign() { assert.fail('legacy signing must stop'); } }),
+    { code: 'UNAPPROVED_PAYMENT_TERMS' });
+
+  const signer = await createKeyPairSignerFromBytes(e.payer.bytes);
+  const legacyClient = new x402Client().register(DEVNET,
+    new ExactSvmClient(signer, { rpcUrl: e.config.rpcUrl, transactionVersions: [0] }));
+  legacyClient.setSpendControls({ maxAmountPerPayment: false, allowedAssets: [
+    { network: DEVNET, asset: e.config.asset, maxAmountPerPayment: '1000' },
+  ] });
+  const payload = await legacyClient.createPaymentPayload(paymentRequired);
+  const paymentHeader = encodePaymentSignatureHeader(payload);
+  const wire = getTransactionDecoder().decode(Buffer.from(payload.payload.transaction, 'base64'));
+  const messageHash = createHash('sha256').update(wire.messageBytes).digest('hex');
+  const signed = { paymentHeader, messageHash, resourceUrl: e.url, payer: e.payer.address, signature: null };
+  const refused = await fetch(e.url, { headers: { 'payment-signature': paymentHeader } });
+  assert.equal(refused.status, 400);
+  assert.equal(e.counts.verify, 0);
+  assert.equal(e.counts.settle, 0);
+  assert.equal(e.counts.claims, 0);
+
+  const response = await e.facilitator.settle(payload);
+  const body = JSON.stringify({ resource_ref: 'urn:floww:report:purchase-1' });
+  const key = createHash('sha256').update(e.url + '\n' + messageHash).digest('hex');
+  e.records.set(key, { status: 'SETTLED', resourceUrl: e.url, messageHash, payer: e.payer.address, response, body });
+  const recovered = await e.gateway.redeem(e.url, signed, quoted);
+  assert.equal(recovered.payment, 'CONFIRMED');
+  assert.equal(recovered.delivery, 'COMPLETED');
+  assert.equal(recovered.body, body);
+  assert.equal(e.counts.settle, 1);
+  assert.equal(e.counts.reports, 0);
 });
 
 test('equivalent concurrent proof is rejected before duplicate facilitator or report work, then cached recovery succeeds', async (t) => {
